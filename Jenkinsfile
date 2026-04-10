@@ -24,6 +24,7 @@ pipeline {
         DEPLOY_PORT = '8000'
         CONTAINER_NAME = 'crud_hr_app'
         DB_CONTAINER_NAME = 'crud_hr_postgres'
+        NETWORK_NAME = 'app-network'
     }
 
     stages {
@@ -72,6 +73,16 @@ pipeline {
             }
         }
 
+        stage('🌐 إنشاء شبكة Docker') {
+            steps {
+                sh '''
+                    # إنشاء الشبكة إذا لم تكن موجودة
+                    docker network create ${NETWORK_NAME} 2>/dev/null || true
+                    echo "✅ الشبكة ${NETWORK_NAME} جاهزة"
+                '''
+            }
+        }
+
         stage('🐳 تشغيل قاعدة البيانات') {
             steps {
                 sh '''
@@ -86,11 +97,14 @@ pipeline {
                         -e POSTGRES_USER=${DB_USER} \
                         -e POSTGRES_PASSWORD=${DB_PASSWORD} \
                         -p 5432:5432 \
-                        --network app-network \
+                        --network ${NETWORK_NAME} \
                         postgres:17
                     
                     echo "⏳ انتظار تجهيز قاعدة البيانات..."
                     sleep 15
+                    
+                    # التحقق من أن قاعدة البيانات تعمل
+                    docker ps | grep ${DB_CONTAINER_NAME}
                 '''
                 echo '✅ قاعدة البيانات جاهزة'
             }
@@ -101,6 +115,10 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
+                    
+                    # انتظار قاعدة البيانات قليلاً
+                    sleep 5
+                    
                     python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
                     cd ..
@@ -179,9 +197,6 @@ EOF
         stage('🌐 تشغيل التطبيق') {
             steps {
                 sh '''
-                    # إنشاء شبكة إذا لم تكن موجودة
-                    docker network create app-network 2>/dev/null || true
-                    
                     # تشغيل التطبيق
                     docker run -d \
                         --name ${CONTAINER_NAME} \
@@ -194,10 +209,13 @@ EOF
                         -e SECRET_KEY=${SECRET_KEY} \
                         -e DEBUG=True \
                         -e ALLOWED_HOSTS=* \
-                        --network app-network \
+                        --network ${NETWORK_NAME} \
                         ${DOCKER_IMAGE}:latest
                     
                     sleep 5
+                    
+                    # التحقق من التشغيل
+                    docker ps | grep ${CONTAINER_NAME}
                 '''
                 echo '✅ تم تشغيل التطبيق'
             }
@@ -212,9 +230,10 @@ EOF
                     if docker ps | grep -q ${CONTAINER_NAME}; then
                         echo "✅ الحاوية تعمل"
                         
-                        # اختبار الصحة
-                        sleep 3
-                        curl -s http://localhost:${DEPLOY_PORT}/ || echo "⚠️ التطبيق يعمل ولكن لا يوجد رد"
+                        # عرض السجلات
+                        echo ""
+                        echo "آخر السجلات:"
+                        docker logs ${CONTAINER_NAME} --tail 20
                     else
                         echo "❌ الحاوية لا تعمل"
                         docker logs ${CONTAINER_NAME} --tail 50
@@ -237,6 +256,7 @@ EOF
                     echo ""
                     echo "حاوية قاعدة البيانات: ${DB_CONTAINER_NAME}"
                     echo "حاوية التطبيق: ${CONTAINER_NAME}"
+                    echo "الشبكة: ${NETWORK_NAME}"
                     echo "صورة Docker: ${DOCKER_IMAGE}:latest"
                     echo ""
                     echo "لرؤية السجلات:"
@@ -266,6 +286,9 @@ EOF
                 echo "🧹 تنظيف البيئة الافتراضية..."
                 rm -rf venv || true
                 echo "✅ تم التنظيف"
+                
+                # لا نقوم بإزالة الشبكة أو الحاويات هنا لتبقى تعمل
+                echo "ملاحظة: الحاويات والشبكة لم يتم إيقافها لتستمر في العمل"
             '''
         }
     }
