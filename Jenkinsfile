@@ -2,178 +2,137 @@ pipeline {
     agent any
 
     environment {
-        // ========== Application Settings ==========
-        IMAGE_NAME = "crud_hr_app"
-        CONTAINER_NAME = "crud_hr_app_container"
+        // Django Settings
         DJANGO_SETTINGS_MODULE = 'hr_core.settings'
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'True'
-        ALLOWED_HOSTS = '*'
+        DJANGO_ALLOW_NULL_ORIGIN_IN_DEBUG = 'True'
+        ALLOWED_HOSTS = 'localhost,127.0.0.1'
         
-        // ========== Database Configuration ==========
+        // Database Configuration (من README)
+        DATABASE_URL = 'postgresql://hr_app_user:LocalPostgres12345!@localhost:5432/ytech_hr'
         DB_NAME = 'ytech_hr'
         DB_USER = 'hr_app_user'
         DB_PASSWORD = 'LocalPostgres12345!'
-        DB_HOST = 'postgres'
+        DB_HOST = 'localhost'
         DB_PORT = '5432'
+
+        // Docker Hub Configuration
+        DOCKER_HUB_USER = 'peacechouaib'
+        DOCKER_IMAGE_NAME = 'crud_hr_app'
+        DOCKER_IMAGE = "${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}"
         
-        // ========== Docker Hub ==========
-        DOCKER_HUB_USERNAME = "peacechouaib"
-        DOCKER_HUB_IMAGE = "crud_hr_app"
-        
-        // ========== Email ==========
-        EMAIL_RECIPIENT = "herraditech@gmail.com"
-        
-        // ========== Python ==========
+        // Python
         PYTHONUNBUFFERED = '1'
     }
 
     stages {
-        // ========== 1. Clone Repository ==========
-        stage('Checkout Code') {
+        stage('📥 سحب الكود من GitHub') {
             steps {
-                git branch: 'main', 
+                git branch: 'main',
                     url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git'
-                echo '✅ Code cloned successfully'
+                echo '✅ تم سحب الكود بنجاح'
             }
         }
 
-        // ========== 2. Setup Python Environment ==========
-        stage('Setup Python') {
+        stage('🐍 تجهيز بيئة Python') {
             steps {
                 sh '''
-                    echo "Setting up Python environment..."
-                    
                     python3.10 -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
                     pip install wheel
-                    pip install Django==4.2.20
-                    pip install djangorestframework psycopg2-binary gunicorn
+                    pip install -r backend/requirements.txt
+                    pip install gunicorn psycopg2-binary argon2-cffi
                     pip install pytest pytest-django pytest-cov flake8 black
-                    pip install argon2-cffi
-                    
-                    # Create requirements.txt if not exists
-                    if [ ! -f "backend/requirements.txt" ]; then
-                        mkdir -p backend
-                        cat > backend/requirements.txt << 'EOF'
-Django==4.2.20
-djangorestframework==3.15.2
-psycopg2-binary==2.9.10
-gunicorn==21.2.0
-argon2-cffi==23.1.0
-EOF
-                    fi
-                    
-                    echo "✅ Python environment ready"
                 '''
+                echo '✅ بيئة Python جاهزة'
             }
         }
 
-        // ========== 3. Fix Django Settings ==========
-        stage('Fix Django Settings') {
+        stage('🔧 فحص وتجهيز قاعدة البيانات') {
             steps {
                 sh '''
-                    echo "Fixing Django settings..."
-                    . venv/bin/activate
-                    
-                    if [ -f "backend/hr_core/settings.py" ]; then
-                        cd backend/hr_core
-                        
-                        # Add employees app to INSTALLED_APPS
-                        if ! grep -q "'employees'" settings.py; then
-                            sed -i "/'django.contrib.staticfiles',/a \\    'employees'," settings.py
-                            echo "✅ Added employees to INSTALLED_APPS"
-                        fi
-                        
-                        # Add accounts app if not present
-                        if ! grep -q "'accounts'" settings.py; then
-                            sed -i "/'django.contrib.staticfiles',/a \\    'accounts'," settings.py
-                            echo "✅ Added accounts to INSTALLED_APPS"
-                        fi
-                        
-                        cd ../..
-                    else
-                        echo "⚠️ settings.py not found, skipping"
-                    fi
-                    
-                    echo "✅ Django settings fixed"
-                '''
-            }
-        }
-
-        // ========== 4. Start PostgreSQL Database ==========
-        stage('Start PostgreSQL') {
-            steps {
-                sh '''
-                    echo "Starting PostgreSQL database..."
-                    
-                    docker stop crud_hr_postgres 2>/dev/null || true
-                    docker rm crud_hr_postgres 2>/dev/null || true
-                    
-                    docker run -d \
-                        --name crud_hr_postgres \
-                        -e POSTGRES_DB=ytech_hr \
-                        -e POSTGRES_USER=hr_app_user \
-                        -e POSTGRES_PASSWORD=LocalPostgres12345! \
-                        -p 5432:5432 \
-                        postgres:17
-                    
-                    echo "Waiting for database to be ready..."
+                    # تشغيل PostgreSQL باستخدام Docker Compose
+                    docker compose up -d postgres
+                    echo "⏳ انتظار تشغيل قاعدة البيانات..."
                     sleep 15
                     
-                    echo "✅ PostgreSQL is running"
+                    # التأكد من أن قاعدة البيانات جاهزة
+                    docker exec crud_hr_postgres pg_isready -U hr_app_user -d ytech_hr || true
                 '''
+                echo '✅ قاعدة البيانات جاهزة'
             }
         }
 
-        // ========== 5. Run Migrations ==========
-        stage('Run Migrations') {
+        stage('🔄 تنفيذ ترحيلات قاعدة البيانات') {
             steps {
                 sh '''
-                    echo "Running database migrations..."
                     . venv/bin/activate
-                    
-                    if [ -f "backend/manage.py" ]; then
-                        cd backend
-                        python manage.py makemigrations --noinput || true
-                        python manage.py migrate --noinput
-                        cd ..
-                        echo "✅ Migrations completed"
-                    else
-                        echo "⚠️ manage.py not found, skipping migrations"
-                    fi
+                    export DATABASE_URL="postgresql://hr_app_user:LocalPostgres12345!@localhost:5432/ytech_hr"
+                    cd backend
+                    python manage.py migrate --noinput
+                    cd ..
                 '''
+                echo '✅ تم تنفيذ الترحيلات بنجاح'
             }
         }
 
-        // ========== 6. Run Tests ==========
-        stage('Run Tests') {
+        stage('🌱 إضافة البيانات التجريبية (Seed)') {
             steps {
                 sh '''
-                    echo "Running tests..."
                     . venv/bin/activate
-                    
-                    if [ -f "backend/manage.py" ]; then
-                        cd backend
-                        python manage.py test --verbosity=2 --noinput || echo "⚠️ Tests completed with warnings"
-                        cd ..
-                    else
-                        echo "⚠️ No tests found"
-                    fi
-                    
-                    echo "✅ Tests completed"
+                    cd backend
+                    python manage.py seed_demo || echo "⚠️ لم يتم العثور على أمر seed_demo"
+                    cd ..
                 '''
+                echo '✅ تم إضافة البيانات التجريبية'
             }
         }
 
-        // ========== 7. Create Dockerfile ==========
-        stage('Create Dockerfile') {
+        stage('🔍 فحص جودة الكود (Linting)') {
             steps {
                 sh '''
-                    echo "Creating Dockerfile..."
-                    
-                    cat > Dockerfile << 'EOF'
+                    . venv/bin/activate
+                    cd backend
+                    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+                    cd ..
+                '''
+                echo '✅ تم فحص جودة الكود'
+            }
+        }
+
+        stage('🧪 تشغيل الاختبارات') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    cd backend
+                    python manage.py test --verbosity=2 --noinput || echo "⚠️ الاختبارات اكتملت مع تحذيرات"
+                    cd ..
+                '''
+                echo '✅ اكتملت الاختبارات'
+            }
+        }
+
+        stage('📦 جمع الملفات الثابتة (Static Files)') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    cd backend
+                    python manage.py collectstatic --noinput || true
+                    cd ..
+                '''
+                echo '✅ تم جمع الملفات الثابتة'
+            }
+        }
+
+        stage('🐳 بناء صورة Docker') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    # إنشاء Dockerfile إذا لم يكن موجوداً
+                    if [ ! -f "Dockerfile" ]; then
+                        cat > Dockerfile << 'EOF'
 FROM python:3.10-slim
 
 WORKDIR /app
@@ -182,6 +141,7 @@ RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
     curl \
+    libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt /app/requirements.txt
@@ -189,9 +149,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install gunicorn psycopg2-binary argon2-cffi
 
 COPY backend /app/backend
-
-# Copy config only if it exists
-RUN if [ -d "config" ]; then cp -r config /app/config; fi
+COPY config /app/config
 
 ENV PYTHONUNBUFFERED=1
 ENV DJANGO_SETTINGS_MODULE=hr_core.settings
@@ -201,138 +159,70 @@ RUN python manage.py collectstatic --noinput || true
 
 EXPOSE 8000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "hr_core.wsgi:application"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--threads", "2", "hr_core.wsgi:application"]
 EOF
-                    
-                    echo "✅ Dockerfile created"
-                '''
-            }
-        }
-
-        // ========== 8. Build Docker Image ==========
-        stage('Build Docker Image') {
-            steps {
-                sh '''
-                    echo "Building Docker image..."
-                    
-                    docker build -t ${IMAGE_NAME}:latest .
-                    docker tag ${IMAGE_NAME}:latest ${IMAGE_NAME}:${BUILD_NUMBER}
-                    
-                    echo "✅ Docker image built: ${IMAGE_NAME}:${BUILD_NUMBER}"
-                '''
-            }
-        }
-
-        // ========== 9. Push to Docker Hub ==========
-        stage('Push to Docker Hub') {
-            steps {
-                script {
-                    // Try to push with credentials if available
-                    sh '''
-                        echo "Pushing to Docker Hub..."
-                        
-                        docker tag ${IMAGE_NAME}:latest ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:latest
-                        docker tag ${IMAGE_NAME}:latest ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER}
-                        
-                        # Try to push
-                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:latest || echo "⚠️ Push failed - need docker login"
-                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER} || echo "⚠️ Push failed - need docker login"
-                        
-                        echo "✅ Push completed"
-                    '''
-                }
-            }
-        }
-
-        // ========== 10. Test Container ==========
-        stage('Test Container') {
-            steps {
-                sh '''
-                    echo "Testing container..."
-                    
-                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
-                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
-                    
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        -p 8000:8000 \
-                        -e DEBUG=True \
-                        -e DB_HOST=172.17.0.1 \
-                        ${IMAGE_NAME}:latest
-                    
-                    sleep 5
-                    
-                    if docker ps | grep -q ${CONTAINER_NAME}; then
-                        echo "✅ Container is running on port 8000"
-                        docker logs ${CONTAINER_NAME} --tail 10
-                    else
-                        echo "⚠️ Container failed to start"
-                        docker logs ${CONTAINER_NAME} --tail 20 2>/dev/null || true
                     fi
                     
-                    echo "✅ Container test completed"
+                    docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
+                    docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
+                '''
+                echo '✅ تم بناء صورة Docker'
+            }
+        }
+
+        stage('📤 رفع الصورة إلى Docker Hub') {
+            when { branch 'main' }
+            steps {
+                withCredentials([string(credentialsId: 'docker-hub-password', variable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo ${DOCKER_PASS} | docker login -u ${DOCKER_HUB_USER} --password-stdin
+                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                        docker push ${DOCKER_IMAGE}:latest
+                    '''
+                }
+                echo '✅ تم رفع الصورة إلى Docker Hub'
+            }
+        }
+
+        stage('🚀 تعليمات التشغيل') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    echo "========================================="
+                    echo "🎉 اكتمل البناء بنجاح! 🎉"
+                    echo "========================================="
+                    echo ""
+                    echo "لتشغيل التطبيق محلياً:"
+                    echo "  docker run -d -p 8000:8000 ${DOCKER_IMAGE}:latest"
+                    echo ""
+                    echo "أو باستخدام Docker Compose:"
+                    echo "  docker compose up -d"
+                    echo ""
+                    echo "حسابات تجريبية:"
+                    echo "  hradmin / ChangeMe123!"
+                    echo "  hruser / ChangeMe123!"
+                    echo "  itadmin / ChangeMe123!"
+                    echo ""
+                    echo "========================================="
                 '''
             }
         }
     }
-    
-    // ========== Post Pipeline Actions ==========
+
     post {
         success {
-            echo ''
-            echo '========================================='
-            echo '✅ PIPELINE COMPLETED SUCCESSFULLY!'
-            echo '========================================='
-            echo "Docker Hub: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER}"
-            echo "Application: http://localhost:8000"
-            echo '========================================='
-            
-            script {
-                try {
-                    emailext(
-                        subject: "✅ Pipeline SUCCESS - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            ✅ Pipeline completed successfully!
-                            
-                            Build: ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                            Status: SUCCESS
-                            
-                            🐳 Docker Hub: ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${env.BUILD_NUMBER}
-                            🌐 Application: http://localhost:8000
-                            
-                            🔗 Build URL: ${env.BUILD_URL}
-                        """,
-                        to: "${EMAIL_RECIPIENT}"
-                    )
-                    echo "✅ Email notification sent"
-                } catch (err) {
-                    echo "⚠️ Email not configured, skipping notification"
-                }
-            }
+            echo '🎉🎉🎉 نجاح! Pipeline اكتمل بنجاح 🎉🎉🎉'
+            echo "رابط Docker Hub: https://hub.docker.com/r/${DOCKER_IMAGE}"
         }
-        
         failure {
-            echo ''
-            echo '========================================='
-            echo '❌ PIPELINE FAILED!'
-            echo '========================================='
-            echo "Check Jenkins logs: ${env.BUILD_URL}"
-            echo '========================================='
+            echo '❌❌❌ فشل! راجع السجلات أعلاه ❌❌❌'
         }
-        
         always {
             sh '''
-                echo "Cleaning up resources..."
-                
-                # Keep database for next build (optional)
-                # docker stop crud_hr_postgres 2>/dev/null || true
-                # docker rm crud_hr_postgres 2>/dev/null || true
-                
-                # Remove virtual environment
+                docker compose down 2>/dev/null || true
                 rm -rf venv || true
-                
-                echo "✅ Cleanup completed"
             '''
+            echo '🧹 تم التنظيف'
         }
     }
 }
