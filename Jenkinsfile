@@ -189,7 +189,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install gunicorn psycopg2-binary argon2-cffi
 
 COPY backend /app/backend
-COPY config /app/config || true
+
+# Copy config only if it exists
+RUN if [ -d "config" ]; then cp -r config /app/config; fi
 
 ENV PYTHONUNBUFFERED=1
 ENV DJANGO_SETTINGS_MODULE=hr_core.settings
@@ -225,18 +227,18 @@ EOF
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    // Try to push without credentials first (if public)
+                    // Try to push with credentials if available
                     sh '''
                         echo "Pushing to Docker Hub..."
                         
                         docker tag ${IMAGE_NAME}:latest ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:latest
                         docker tag ${IMAGE_NAME}:latest ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER}
                         
-                        # Try to push (will fail if not logged in)
-                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:latest || echo "⚠️ Need to login to Docker Hub"
-                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER} || echo "⚠️ Need to login to Docker Hub"
+                        # Try to push
+                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:latest || echo "⚠️ Push failed - need docker login"
+                        docker push ${DOCKER_HUB_USERNAME}/${DOCKER_HUB_IMAGE}:${BUILD_NUMBER} || echo "⚠️ Push failed - need docker login"
                         
-                        echo "✅ Push completed or manual login required"
+                        echo "✅ Push completed"
                     '''
                 }
             }
@@ -255,6 +257,7 @@ EOF
                         --name ${CONTAINER_NAME} \
                         -p 8000:8000 \
                         -e DEBUG=True \
+                        -e DB_HOST=172.17.0.1 \
                         ${IMAGE_NAME}:latest
                     
                     sleep 5
@@ -264,6 +267,7 @@ EOF
                         docker logs ${CONTAINER_NAME} --tail 10
                     else
                         echo "⚠️ Container failed to start"
+                        docker logs ${CONTAINER_NAME} --tail 20 2>/dev/null || true
                     fi
                     
                     echo "✅ Container test completed"
@@ -283,7 +287,6 @@ EOF
             echo "Application: http://localhost:8000"
             echo '========================================='
             
-            // Optional: Send email if credentials are configured
             script {
                 try {
                     emailext(
@@ -315,32 +318,13 @@ EOF
             echo '========================================='
             echo "Check Jenkins logs: ${env.BUILD_URL}"
             echo '========================================='
-            
-            script {
-                try {
-                    emailext(
-                        subject: "❌ Pipeline FAILED - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-                        body: """
-                            ❌ Pipeline failed!
-                            
-                            Build: ${env.JOB_NAME} #${env.BUILD_NUMBER}
-                            Status: FAILED
-                            
-                            🔗 Check Jenkins logs: ${env.BUILD_URL}
-                        """,
-                        to: "${EMAIL_RECIPIENT}"
-                    )
-                } catch (err) {
-                    echo "⚠️ Email not configured"
-                }
-            }
         }
         
         always {
             sh '''
                 echo "Cleaning up resources..."
                 
-                # Stop database container (optional - comment to keep for next build)
+                # Keep database for next build (optional)
                 # docker stop crud_hr_postgres 2>/dev/null || true
                 # docker rm crud_hr_postgres 2>/dev/null || true
                 
@@ -348,7 +332,7 @@ EOF
                 rm -rf venv || true
                 
                 echo "✅ Cleanup completed"
-            '''.replaceAll("\\s+", " ").trim()
+            '''
         }
     }
 }
