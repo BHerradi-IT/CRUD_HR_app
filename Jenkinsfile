@@ -2,7 +2,7 @@ pipeline {
     agent any
     
     environment {
-        DJANGO_SETTINGS_MODULE = 'config.settings'
+        DJANGO_SETTINGS_MODULE = 'hr_core.settings'
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'True'
         ALLOWED_HOSTS = 'localhost,127.0.0.1'
@@ -34,12 +34,17 @@ pipeline {
                     pip install --upgrade pip
                     pip install wheel
                     
-                    # Install from backend/accounts/requirements.txt
-                    if [ -f "backend/accounts/requirements.txt" ]; then
-                        pip install -r backend/accounts/requirements.txt
+                    # Install requirements if exists
+                    if [ -f "backend/requirements.txt" ]; then
+                        pip install -r backend/requirements.txt
                     fi
                     
-                    # Install additional packages
+                    if [ -f "backend/hr_core/requirements.txt" ]; then
+                        pip install -r backend/hr_core/requirements.txt
+                    fi
+                    
+                    # Install Django and core packages
+                    pip install Django==4.2.20
                     pip install djangorestframework psycopg2-binary gunicorn
                     pip install pytest pytest-django pytest-cov flake8 black
                     
@@ -54,7 +59,9 @@ pipeline {
             steps {
                 sh '''
                     . venv/bin/activate
-                    flake8 backend/accounts/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
+                    cd backend
+                    flake8 hr_core/ --count --select=E9,F63,F7,F82 --show-source --statistics || true
+                    cd ..
                 '''
                 echo 'Linting completed'
             }
@@ -71,6 +78,7 @@ pipeline {
                         -e POSTGRES_PASSWORD=postgres \
                         -p 5432:5432 \
                         postgres:15
+                    echo "Waiting for database..."
                     sleep 10
                 '''
                 echo 'Database ready'
@@ -82,12 +90,14 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     
-                    # Run migrations from the correct location
-                    # manage.py is in backend/accounts/
-                    cd backend/accounts
+                    # Go to backend directory where manage.py is
+                    cd backend
+                    
+                    # Run migrations
                     python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
-                    cd ../..
+                    
+                    cd ..
                 '''
                 echo 'Migrations completed'
             }
@@ -98,21 +108,35 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     
-                    cd backend/accounts
+                    cd backend
                     python manage.py test --verbosity=2 --noinput
-                    cd ../..
+                    cd ..
                 '''
                 echo 'Tests completed'
+            }
+        }
+        
+        stage('Docker Build (Optional)') {
+            when {
+                branch 'main'
+                expression { return fileExists('compose.yaml') }
+            }
+            steps {
+                sh '''
+                    docker-compose -f compose.yaml build
+                    echo "Docker image built successfully"
+                '''
+                echo 'Docker build completed'
             }
         }
     }
     
     post {
         success {
-            echo 'Pipeline completed successfully!'
+            echo '🎉 Pipeline completed successfully! 🎉'
         }
         failure {
-            echo 'Pipeline failed! Check logs above.'
+            echo '❌ Pipeline failed! Check logs above. ❌'
         }
         always {
             sh '''
