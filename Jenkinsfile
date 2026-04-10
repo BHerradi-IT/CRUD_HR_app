@@ -16,216 +16,220 @@ pipeline {
         DOCKER_HUB_USER = 'peacechouaib'
         DOCKER_IMAGE_NAME = 'crud_hr_app'
         DOCKER_IMAGE = "${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}"
-        
+
         PYTHONUNBUFFERED = '1'
     }
 
     stages {
+
         stage('Checkout') {
             steps {
                 git branch: 'main',
                     url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git'
-                echo 'Code checked out'
+                echo '✅ Code checked out'
             }
         }
 
         stage('Setup Python') {
             steps {
-                sh '''
-                    python3.10 -m venv venv
+                sh """
+                    python3 -m venv venv
                     . venv/bin/activate
+
                     pip install --upgrade pip
-                    pip install Django==4.2.20
-                    pip install djangorestframework psycopg2-binary gunicorn
-                    pip install pytest pytest-django pytest-cov flake8 black
-                    pip install argon2-cffi
-                '''
-                echo 'Python ready'
+                    pip install Django==4.2.20 djangorestframework \
+                        psycopg2-binary gunicorn argon2-cffi \
+                        pytest pytest-django pytest-cov \
+                        flake8 black coverage
+                """
+                echo '✅ Python environment ready'
             }
         }
 
         stage('Fix Django Configuration') {
             steps {
-                sh '''
+                sh """
                     . venv/bin/activate
                     cd backend/hr_core
-                    
-                    # Add employees to INSTALLED_APPS
-                    python3 << 'PYTHON_FIX'
+
+                    python3 << 'EOF'
 import re
+
 with open('settings.py', 'r') as f:
     content = f.read()
 
-# Add employees to INSTALLED_APPS
+# Add employees app safely
 if "'employees'" not in content:
-    # Find INSTALLED_APPS and add employees
-    pattern = r"(INSTALLED_APPS\s*=\s*\[)([^\]]*)(\])"
+    pattern = "(INSTALLED_APPS\\\\s*=\\\\s*\\\\[)([^\\\\]]*)(\\\\])"
+
     def add_app(match):
         apps = match.group(2)
         if "'employees'" not in apps:
-            apps = apps.rstrip() + "\n    'employees',\n"
+            apps = apps.rstrip() + "\\n    'employees',\\n"
         return match.group(1) + apps + match.group(3)
-    content = re.sub(pattern, add_app, content, flags=re.DOTALL)
-    print("Added employees to INSTALLED_APPS")
 
-# Add argon2 to PASSWORD_HASHERS if not using default
+    content = re.sub(pattern, add_app, content, flags=re.DOTALL)
+    print("✅ employees added")
+
+# Add PASSWORD_HASHERS if missing
 if "PASSWORD_HASHERS" not in content:
-    content += """
+    content += '''
 PASSWORD_HASHERS = [
-    'django.contrib.auth.hashers.Argon2PasswordHasher',
-    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
-    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
-    'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
 ]
-"""
+'''
+    print("✅ PASSWORD_HASHERS added")
 
 with open('settings.py', 'w') as f:
     f.write(content)
-print("Settings updated successfully")
-PYTHON_FIX
-                    
+
+print("✅ settings.py updated")
+EOF
+
                     cd ../..
-                '''
-                echo 'Django configuration fixed'
+                """
+                echo '✅ Django config fixed'
             }
         }
 
-        stage('Lint Code') {
+        stage('Lint') {
             steps {
-                sh '''
+                sh """
                     . venv/bin/activate
                     cd backend
-                    flake8 hr_core/ --count --statistics || true
-                    cd ..
-                '''
-                echo 'Linting done'
+                    flake8 . || true
+                """
+                echo '✅ Lint done'
             }
         }
 
-        stage('Setup Database') {
+        stage('Start PostgreSQL') {
             steps {
-                sh '''
-                    docker stop postgres-test 2>/dev/null || true
-                    docker rm postgres-test 2>/dev/null || true
+                sh """
+                    docker rm -f postgres-test || true
+
                     docker run -d --name postgres-test \
-                        -e POSTGRES_DB=hr_app_db \
-                        -e POSTGRES_USER=postgres \
-                        -e POSTGRES_PASSWORD=postgres \
-                        -p 5432:5432 \
-                        postgres:15
+                        -e POSTGRES_DB=${DB_NAME} \
+                        -e POSTGRES_USER=${DB_USER} \
+                        -e POSTGRES_PASSWORD=${DB_PASSWORD} \
+                        -p 5432:5432 postgres:15
+
                     sleep 10
-                '''
-                echo 'Database ready'
+                """
+                echo '✅ PostgreSQL running'
             }
         }
 
-        stage('Run Migrations') {
+        stage('Migrate') {
             steps {
-                sh '''
+                sh """
                     . venv/bin/activate
                     cd backend
-                    python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
-                    cd ..
-                '''
-                echo 'Migrations done'
+                """
+                echo '✅ Migrations done'
             }
         }
 
-        stage('Run Tests') {
+        stage('Test') {
             steps {
-                sh '''
+                sh """
                     . venv/bin/activate
                     cd backend
-                    python manage.py test --verbosity=2 --noinput || echo "Tests had warnings"
-                    cd ..
-                '''
-                echo 'Tests done'
+                    python manage.py test --noinput || true
+                """
+                echo '✅ Tests executed'
             }
         }
 
-        stage('Generate Coverage') {
+        stage('Coverage') {
             steps {
-                sh '''
+                sh """
                     . venv/bin/activate
                     cd backend
                     coverage run manage.py test || true
                     coverage report || true
-                    cd ..
-                '''
-                echo 'Coverage report generated'
+                """
+                echo '✅ Coverage generated'
             }
         }
 
         stage('Build Docker') {
             when { branch 'main' }
             steps {
-                sh '''
-                    if [ ! -f "Dockerfile" ]; then
-                        cat > Dockerfile << 'EOF'
+                sh """
+                    if [ ! -f Dockerfile ]; then
+                        cat > Dockerfile << 'DOCKERFILE'
 FROM python:3.10-slim
+
 WORKDIR /app
-RUN apt-get update && apt-get install -y gcc postgresql-client curl && rm -rf /var/lib/apt/lists/*
-COPY backend/requirements.txt /app/requirements.txt
+
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt .
+
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install gunicorn psycopg2-binary argon2-cffi
-COPY backend /app/backend
-COPY config /app/config
-WORKDIR /app/backend
+
+COPY backend .
+
 RUN python manage.py collectstatic --noinput || true
+
 EXPOSE 8000
+
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "hr_core.wsgi:application"]
-EOF
+DOCKERFILE
                     fi
-                    
+
                     docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
                     docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
-                '''
-                echo 'Docker image built'
+                """
+                echo '✅ Docker built'
             }
         }
 
-        stage('Push to Docker Hub') {
+        stage('Push Docker Image') {
             when { branch 'main' }
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-password', variable: 'DOCKER_PASS')]) {
-                    sh '''
-                        echo ${DOCKER_PASS} | docker login -u ${DOCKER_HUB_USER} --password-stdin
+                    sh """
+                        echo \$DOCKER_PASS | docker login -u ${DOCKER_HUB_USER} --password-stdin
                         docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
                         docker push ${DOCKER_IMAGE}:latest
-                    '''
+                    """
                 }
-                echo 'Pushed to Docker Hub'
+                echo '✅ Docker pushed'
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy Info') {
             when { branch 'main' }
             steps {
-                sh '''
-                    echo "Deployment ready"
-                    echo "Run: docker pull ${DOCKER_IMAGE}:latest"
-                    echo "Run: docker run -d -p 8000:8000 ${DOCKER_IMAGE}:latest"
-                '''
-                echo 'Deployment instructions printed'
+                echo """
+🚀 Deployment commands:
+docker pull ${DOCKER_IMAGE}:latest
+docker run -d -p 8000:8000 ${DOCKER_IMAGE}:latest
+"""
             }
         }
     }
 
     post {
-        success {
-            echo 'Pipeline SUCCESS!'
-        }
-        failure {
-            echo 'Pipeline FAILED!'
-        }
         always {
-            sh '''
-                docker stop postgres-test 2>/dev/null || true
-                docker rm postgres-test 2>/dev/null || true
+            sh """
+                docker rm -f postgres-test || true
                 rm -rf venv || true
-            '''
-            echo 'Cleanup done'
+            """
+            echo '🧹 Cleanup done'
+        }
+
+        success {
+            echo '🎉 PIPELINE SUCCESS'
+        }
+
+        failure {
+            echo '❌ PIPELINE FAILED'
         }
     }
 }
