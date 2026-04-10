@@ -25,7 +25,50 @@ pipeline {
             }
         }
         
-        stage('Explore Project Structure') {
+       stage('Find Django Settings') {
+    steps {
+        sh '''
+            echo "========================================="
+            echo "Searching for Django project structure"
+            echo "========================================="
+            
+            echo "1. Looking for manage.py files:"
+            find . -name "manage.py" -type f 2>/dev/null
+            
+            echo ""
+            echo "2. Looking for settings.py files:"
+            find . -name "settings.py" -type f 2>/dev/null
+            
+            echo ""
+            echo "3. Looking for wsgi.py files:"
+            find . -name "wsgi.py" -type f 2>/dev/null
+            
+            echo ""
+            echo "4. Backend directory content:"
+            ls -la backend/ 2>/dev/null || echo "No backend directory"
+            
+            echo ""
+            echo "5. Config directory content:"
+            ls -la config/ 2>/dev/null || echo "No config directory"
+            
+            echo ""
+            echo "6. Current directory structure:"
+            tree -L 2 2>/dev/null || find . -maxdepth 2 -type d
+            
+            echo ""
+            echo "7. Checking if backend is the Django project root:"
+            if [ -f "backend/settings.py" ]; then
+                echo "✓ Found: backend/settings.py"
+            elif [ -f "backend/config/settings.py" ]; then
+                echo "✓ Found: backend/config/settings.py"
+            elif [ -f "config/settings.py" ]; then
+                echo "✓ Found: config/settings.py"
+            else
+                echo "✗ No settings.py found in expected locations"
+            fi
+        '''
+    }
+} stage('Explore Project Structure') {
             steps {
                 sh '''
                     echo "Project structure:"
