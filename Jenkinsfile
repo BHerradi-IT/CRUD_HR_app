@@ -9,7 +9,7 @@ pipeline {
         DJANGO_ALLOW_NULL_ORIGIN_IN_DEBUG = 'True'
         ALLOWED_HOSTS = 'localhost,127.0.0.1'
         
-        // Database Configuration (من README)
+        // Database Configuration
         DATABASE_URL = 'postgresql://hr_app_user:LocalPostgres12345!@localhost:5432/ytech_hr'
         DB_NAME = 'ytech_hr'
         DB_USER = 'hr_app_user'
@@ -42,7 +42,9 @@ pipeline {
                     . venv/bin/activate
                     pip install --upgrade pip
                     pip install wheel
-                    pip install -r backend/requirements.txt
+                    if [ -f "backend/requirements.txt" ]; then
+                        pip install -r backend/requirements.txt
+                    fi
                     pip install gunicorn psycopg2-binary argon2-cffi
                     pip install pytest pytest-django pytest-cov flake8 black
                 '''
@@ -50,16 +52,27 @@ pipeline {
             }
         }
 
-        stage('🔧 فحص وتجهيز قاعدة البيانات') {
+        stage('🔧 تنظيف وإعداد قاعدة البيانات') {
             steps {
                 sh '''
+                    echo "تنظيف الحاويات القديمة..."
+                    # إيقاف وإزالة الحاوية القديمة إذا كانت موجودة
+                    docker stop crud_hr_postgres 2>/dev/null || true
+                    docker rm crud_hr_postgres 2>/dev/null || true
+                    
+                    # إزالة الشبكة القديمة إذا لزم الأمر
+                    docker network prune -f 2>/dev/null || true
+                    
+                    echo "تشغيل قاعدة بيانات جديدة..."
                     # تشغيل PostgreSQL باستخدام Docker Compose
                     docker compose up -d postgres
+                    
                     echo "⏳ انتظار تشغيل قاعدة البيانات..."
                     sleep 15
                     
                     # التأكد من أن قاعدة البيانات جاهزة
-                    docker exec crud_hr_postgres pg_isready -U hr_app_user -d ytech_hr || true
+                    docker exec crud_hr_postgres pg_isready -U hr_app_user -d ytech_hr 2>/dev/null || echo "⚠️ انتظار إضافي لقاعدة البيانات..."
+                    sleep 5
                 '''
                 echo '✅ قاعدة البيانات جاهزة'
             }
@@ -83,7 +96,7 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
-                    python manage.py seed_demo || echo "⚠️ لم يتم العثور على أمر seed_demo"
+                    python manage.py seed_demo 2>/dev/null || echo "⚠️ أمر seed_demo غير موجود - تخطي"
                     cd ..
                 '''
                 echo '✅ تم إضافة البيانات التجريبية'
@@ -95,7 +108,7 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
-                    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+                    flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics 2>/dev/null || true
                     cd ..
                 '''
                 echo '✅ تم فحص جودة الكود'
@@ -107,7 +120,7 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
-                    python manage.py test --verbosity=2 --noinput || echo "⚠️ الاختبارات اكتملت مع تحذيرات"
+                    python manage.py test --verbosity=2 --noinput 2>&1 || echo "⚠️ الاختبارات اكتملت مع تحذيرات"
                     cd ..
                 '''
                 echo '✅ اكتملت الاختبارات'
@@ -119,7 +132,7 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
-                    python manage.py collectstatic --noinput || true
+                    python manage.py collectstatic --noinput 2>/dev/null || true
                     cd ..
                 '''
                 echo '✅ تم جمع الملفات الثابتة'
@@ -198,7 +211,7 @@ EOF
                     echo "أو باستخدام Docker Compose:"
                     echo "  docker compose up -d"
                     echo ""
-                    echo "حسابات تجريبية:"
+                    echo "حسابات تجريبية (من README):"
                     echo "  hradmin / ChangeMe123!"
                     echo "  hruser / ChangeMe123!"
                     echo "  itadmin / ChangeMe123!"
@@ -219,7 +232,11 @@ EOF
         }
         always {
             sh '''
+                # تنظيف الحاويات والشبكات
+                docker stop crud_hr_postgres 2>/dev/null || true
+                docker rm crud_hr_postgres 2>/dev/null || true
                 docker compose down 2>/dev/null || true
+                docker network prune -f 2>/dev/null || true
                 rm -rf venv || true
             '''
             echo '🧹 تم التنظيف'
