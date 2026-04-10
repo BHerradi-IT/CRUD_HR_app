@@ -1,0 +1,50 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Ytech HR{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body>
+    <main class="container">
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">Ytech Solutions</p>
+                <h1>Internal HR Workspace</h1>
+            </div>
+            {% if request.user.is_authenticated %}
+            <nav>
+                {% if can_access_employee_directory %}
+                <a href="{% url 'employee-list' %}">Employees</a>
+                {% endif %}
+                {% if can_review_holiday_requests %}
+                <a href="{% url 'employee-leave-queue' %}">Leave Requests</a>
+                {% endif %}
+                {% if can_access_account_directory %}
+                <a href="{% url 'account-access-list' %}">Account Access</a>
+                {% endif %}
+                {% if has_employee_self_service %}
+                <a href="{% url 'employee-self-service' %}">My Profile</a>
+                <a href="{% url 'employee-sanctions' %}">My Warnings</a>
+                {% endif %}
+                <a href="{% url 'password-change' %}">Change Password</a>
+                <form method="post" action="{% url 'logout' %}" class="logout-form">
+                    {% csrf_token %}
+                    <button type="submit" class="secondary-button">Log out</button>
+                </form>
+            </nav>
+            {% endif %}
+        </header>
+
+        {% if messages %}
+            {% for message in messages %}
+            <article class="message {{ message.tags }}">{{ message }}</article>
+            {% endfor %}
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

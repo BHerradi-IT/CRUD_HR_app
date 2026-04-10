@@ -1,0 +1,32 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login | Ytech HR</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+</head>
+<body class="auth-shell">
+    <main class="auth-card">
+        <p class="eyebrow">Internal Access Only</p>
+        <h1>Ytech HR</h1>
+        <p class="subtitle">HR staff can sign in with their username or work email. Employees sign in with their work email.</p>
+
+        {% if form.errors %}
+        <article class="message error">Login failed. Check the work email or username and password.</article>
+        {% endif %}
+
+        <form method="post" class="stacked-form">
+            {% csrf_token %}
+            <label for="{{ form.username.id_for_label }}">{{ form.username.label }}</label>
+            {{ form.username }}
+
+            <label for="{{ form.password.id_for_label }}">Password</label>
+            {{ form.password }}
+
+            <button type="submit">Sign in</button>
+        </form>
+    </main>
+</body>
+</html>

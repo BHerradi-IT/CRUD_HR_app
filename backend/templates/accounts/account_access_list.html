@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Account Access | Ytech HR{% endblock %}
+
+{% block content %}
+<section class="hero-panel">
+    <div>
+        <p class="eyebrow">Privilege Control</p>
+        <h2>Account Access</h2>
+        {% if can_manage_account_privileges and can_delete_accounts %}
+        <p>Assign workspace privileges and permanently remove sign-in accounts without opening Django admin.</p>
+        {% elif can_manage_account_privileges %}
+        <p>Assign workspace privileges to specific accounts without opening Django admin.</p>
+        {% else %}
+        <p>Review sign-in accounts and permanently remove them when access must be revoked.</p>
+        {% endif %}
+    </div>
+</section>
+
+<section class="role-grid">
+    {% for role_name, role_description in role_details %}
+    <article>
+        <strong>{{ role_name }}</strong>
+        <p>{{ role_description }}</p>
+    </article>
+    {% endfor %}
+</section>
+
+<section class="table-shell">
+    <table>
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Current Privileges</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in account_rows %}
+            <tr>
+                <td>{{ row.user.username }}</td>
+                <td>{{ row.user.get_full_name|default:"-" }}</td>
+                <td>{{ row.user.email|default:"-" }}</td>
+                <td>
+                    {% if row.privileges %}
+                        {% for privilege in row.privileges %}
+                        <span class="privilege-pill">{{ privilege }}</span>
+                        {% endfor %}
+                    {% else %}
+                    <span class="muted-label">No special privileges</span>
+                    {% endif %}
+                </td>
+                <td class="actions">
+                    {% if can_manage_account_privileges %}
+                    <a href="{% url 'account-access-update' row.user.pk %}">Manage Privileges</a>
+                    {% endif %}
+                    {% if can_delete_accounts and row.user.pk != request.user.pk %}
+                    <a href="{% url 'account-access-delete' row.user.pk %}" class="danger-link">Delete Account</a>
+                    {% endif %}
+                    {% if can_delete_accounts and row.user.pk == request.user.pk %}
+                    <span class="muted-label">Current account</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5">No accounts are available.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+
+{% if is_paginated %}
+<nav class="pagination-bar">
+    {% if page_obj.has_previous %}
+    <a href="?page={{ page_obj.previous_page_number }}">Previous</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a href="?page={{ page_obj.next_page_number }}">Next</a>
+    {% else %}
+    <span></span>
+    {% endif %}
+</nav>
+{% endif %}
+{% endblock %}
