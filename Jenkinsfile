@@ -6,14 +6,17 @@ pipeline {
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'True'
         ALLOWED_HOSTS = '*'
-        DB_NAME = 'hr_app_db'
-        DB_USER = 'postgres'
-        DB_PASSWORD = 'postgres'
+        
+        // Database from docker-compose
+        DB_NAME = 'ytech_hr'
+        DB_USER = 'hr_app_user'
+        DB_PASSWORD = 'LocalPostgres12345!'
         DB_HOST = 'localhost'
         DB_PORT = '5432'
+
         DOCKER_HUB_USER = 'peacechouaib'
-        DOCKER_IMAGE_NAME = 'crud_hr_app'
-        DOCKER_IMAGE = "${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}"
+        DOCKER_IMAGE = "${DOCKER_HUB_USER}/crud_hr_app"
+        
         PYTHONUNBUFFERED = '1'
     }
 
@@ -32,81 +35,121 @@ pipeline {
                     python3.10 -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
-                    pip install Django==4.2.20 djangorestframework psycopg2-binary gunicorn
-                    pip install pytest pytest-django pytest-cov flake8 black argon2-cffi
+                    pip install Django==4.2.20
+                    pip install djangorestframework psycopg2-binary gunicorn
+                    pip install pytest pytest-django pytest-cov flake8 black
+                    pip install argon2-cffi
                 '''
                 echo 'Python ready'
             }
         }
 
-        stage('Apply Fixes') {
+        stage('Fix Django Settings') {
             steps {
                 sh '''
                     . venv/bin/activate
-                    python3 fix_settings.py
+                    cd backend/hr_core
+                    
+                    # Add employees to INSTALLED_APPS
+                    if ! grep -q "'employees'" settings.py; then
+                        sed -i "/'django.contrib.staticfiles',/a \\    'employees'," settings.py
+                    fi
+                    
+                    cd ../..
                 '''
-                echo 'Fixes applied'
+                echo 'Settings fixed'
             }
         }
 
-        stage('Setup Database') {
+        stage('Start Docker Compose Services') {
             steps {
                 sh '''
-                    docker stop postgres-test 2>/dev/null || true
-                    docker rm postgres-test 2>/dev/null || true
-                    docker run -d --name postgres-test \
-                        -e POSTGRES_DB=hr_app_db \
-                        -e POSTGRES_USER=postgres \
-                        -e POSTGRES_PASSWORD=postgres \
-                        -p 5432:5432 \
-                        postgres:15
-                    sleep 10
+                    docker-compose -f compose.yaml down -v 2>/dev/null || true
+                    docker-compose -f compose.yaml up -d postgres redis
+                    sleep 15
                 '''
-                echo 'Database ready'
+                echo 'Services started'
             }
         }
 
-        stage('Run Migrations & Tests') {
+        stage('Run Migrations') {
             steps {
                 sh '''
                     . venv/bin/activate
                     cd backend
                     python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
-                    python manage.py test --verbosity=2 --noinput || echo "Tests completed"
                     cd ..
                 '''
-                echo 'Done'
+                echo 'Migrations done'
             }
         }
 
-        stage('Build & Push Docker') {
+        stage('Run Tests') {
+            steps {
+                sh '''
+                    . venv/bin/activate
+                    cd backend
+                    python manage.py test --verbosity=2 --noinput || echo "Tests done"
+                    cd ..
+                '''
+                echo 'Tests completed'
+            }
+        }
+
+        stage('Build Docker Image') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    docker-compose -f compose.yaml build web
+                    docker tag peacechouaib/crud_hr_app:latest ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                    docker tag peacechouaib/crud_hr_app:latest ${DOCKER_IMAGE}:latest
+                '''
+                echo 'Docker image built'
+            }
+        }
+
+        stage('Push to Docker Hub') {
             when { branch 'main' }
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-password', variable: 'DOCKER_PASS')]) {
                     sh '''
-                        docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
-                        docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
                         echo ${DOCKER_PASS} | docker login -u ${DOCKER_HUB_USER} --password-stdin
                         docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
                         docker push ${DOCKER_IMAGE}:latest
                     '''
                 }
-                echo 'Docker image pushed'
+                echo 'Pushed to Docker Hub'
+            }
+        }
+
+        stage('Deploy with Docker Compose') {
+            when { branch 'main' }
+            steps {
+                sh '''
+                    docker-compose -f compose.yaml down
+                    docker-compose -f compose.yaml pull
+                    docker-compose -f compose.yaml up -d
+                    echo "Deployment complete!"
+                '''
+                echo 'Deployed successfully'
             }
         }
     }
 
     post {
+        success {
+            echo 'Pipeline SUCCESS!'
+        }
+        failure {
+            echo 'Pipeline FAILED!'
+        }
         always {
             sh '''
-                docker stop postgres-test 2>/dev/null || true
-                docker rm postgres-test 2>/dev/null || true
+                docker-compose -f compose.yaml down -v 2>/dev/null || true
                 rm -rf venv || true
             '''
             echo 'Cleanup done'
         }
-        success { echo 'SUCCESS!' }
-        failure { echo 'FAILED!' }
     }
 }
