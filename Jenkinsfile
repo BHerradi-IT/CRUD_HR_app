@@ -20,17 +20,29 @@ pipeline {
         DOCKER_IMAGE_NAME = 'crud_hr_app'
         DOCKER_IMAGE = "${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}"
         
+        // GitHub (اختياري - يستخدم للدفع إذا أردت)
+        GITHUB_REPO = 'CRUD_HR_app'
+        GITHUB_USER = 'BHerradi-IT'
+        
         // Python
         PYTHONUNBUFFERED = '1'
     }
 
     stages {
-        // ========== 1. سحب الكود ==========
+        // ========== 1. سحب الكود من GitHub باستخدام credentials ==========
         stage('📥 سحب الكود من GitHub') {
             steps {
                 git branch: 'main',
-                    url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git'
-                echo '✅ تم سحب الكود بنجاح'
+                    url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git',
+                    credentialsId: 'github-credentials'  // استخدام GitHub credentials
+                echo '✅ تم سحب الكود بنجاح من GitHub'
+                
+                // عرض معلومات المستخدم (اختياري)
+                sh '''
+                    echo "معلومات المستودع:"
+                    git remote -v
+                    git log -1 --oneline
+                '''
             }
         }
 
@@ -107,26 +119,33 @@ pipeline {
             }
         }
 
-        // ========== 6. إضافة البيانات التجريبية ==========
-        stage('🌱 إضافة البيانات التجريبية (Seed)') {
+        // ========== 6. إضافة البيانات التجريبية (Seed) ==========
+        stage('🌱 إضافة البيانات التجريبية') {
             steps {
                 sh '''
                     echo "إضافة البيانات التجريبية..."
                     . venv/bin/activate
                     export DATABASE_URL="${DATABASE_URL}"
                     cd backend
-                    python manage.py seed_demo || echo "⚠️ أمر seed_demo غير موجود، يتم إنشاء مستخدمين افتراضيين..."
                     
-                    # إنشاء مستخدمين افتراضيين إذا لم يكن seed_demo موجوداً
-                    python manage.py shell -c "
+                    # محاولة تشغيل seed_demo
+                    python manage.py seed_demo 2>/dev/null || {
+                        echo "⚠️ أمر seed_demo غير موجود، يتم إنشاء مستخدمين افتراضيين..."
+                        python manage.py shell -c "
 from django.contrib.auth import get_user_model;
 User = get_user_model();
-users = [('hradmin', 'admin@ytech.local', 'ChangeMe123!'), ('hruser', 'hr@ytech.local', 'ChangeMe123!'), ('itadmin', 'it@ytech.local', 'ChangeMe123!'), ('ceo', 'ceo@ytech.local', 'ChangeMe123!')];
+users = [
+    ('hradmin', 'admin@ytech.local', 'ChangeMe123!'),
+    ('hruser', 'hr@ytech.local', 'ChangeMe123!'),
+    ('itadmin', 'it@ytech.local', 'ChangeMe123!'),
+    ('ceo', 'ceo@ytech.local', 'ChangeMe123!')
+];
 for u in users:
     if not User.objects.filter(username=u[0]).exists():
         User.objects.create_user(u[0], u[1], u[2])
         print(f'✅ تم إنشاء المستخدم {u[0]}')
-" || true
+"
+                    }
                     cd ..
                     echo "✅ تم إضافة البيانات التجريبية"
                 '''
@@ -210,7 +229,7 @@ EOF
             }
         }
 
-        // ========== 10. تشغيل التطبيق (اختبار) ==========
+        // ========== 10. تشغيل التطبيق ==========
         stage('🚀 تشغيل التطبيق') {
             steps {
                 sh '''
@@ -276,6 +295,7 @@ EOF
             echo "========================================="
             echo "📍 التطبيق يعمل على: http://192.168.142.142:8000/login/"
             echo "🐳 Docker Hub: https://hub.docker.com/r/${DOCKER_IMAGE}"
+            echo "🐙 GitHub: https://github.com/${GITHUB_USER}/${GITHUB_REPO}"
             echo "========================================="
         }
         failure {
@@ -285,7 +305,6 @@ EOF
             echo '🧹 تنظيف البيئة الافتراضية...'
             sh '''
                 # لا نوقف التطبيق هنا حتى يبقى يعمل
-                # فقط ننظف البيئة الافتراضية
                 rm -rf venv || true
                 echo "✅ تم التنظيف"
             '''
