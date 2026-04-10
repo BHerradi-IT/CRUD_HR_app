@@ -7,7 +7,7 @@ pipeline {
         DEBUG = 'True'
         ALLOWED_HOSTS = '*'
         
-        // Database from docker-compose
+        // Database values (matching compose.yaml)
         DB_NAME = 'ytech_hr'
         DB_USER = 'hr_app_user'
         DB_PASSWORD = 'LocalPostgres12345!'
@@ -53,6 +53,7 @@ pipeline {
                     # Add employees to INSTALLED_APPS
                     if ! grep -q "'employees'" settings.py; then
                         sed -i "/'django.contrib.staticfiles',/a \\    'employees'," settings.py
+                        echo "Added employees"
                     fi
                     
                     cd ../..
@@ -61,14 +62,23 @@ pipeline {
             }
         }
 
-        stage('Start Docker Compose Services') {
+        stage('Start PostgreSQL') {
             steps {
                 sh '''
-                    docker-compose -f compose.yaml down -v 2>/dev/null || true
-                    docker-compose -f compose.yaml up -d postgres redis
+                    docker stop crud_hr_postgres 2>/dev/null || true
+                    docker rm crud_hr_postgres 2>/dev/null || true
+                    
+                    docker run -d \
+                        --name crud_hr_postgres \
+                        -e POSTGRES_DB=ytech_hr \
+                        -e POSTGRES_USER=hr_app_user \
+                        -e POSTGRES_PASSWORD=LocalPostgres12345! \
+                        -p 5432:5432 \
+                        postgres:17
+                    
                     sleep 15
                 '''
-                echo 'Services started'
+                echo 'Database ready'
             }
         }
 
@@ -90,20 +100,19 @@ pipeline {
                 sh '''
                     . venv/bin/activate
                     cd backend
-                    python manage.py test --verbosity=2 --noinput || echo "Tests done"
+                    python manage.py test --verbosity=2 --noinput || echo "Tests completed"
                     cd ..
                 '''
-                echo 'Tests completed'
+                echo 'Tests done'
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build Docker') {
             when { branch 'main' }
             steps {
                 sh '''
-                    docker-compose -f compose.yaml build web
-                    docker tag peacechouaib/crud_hr_app:latest ${DOCKER_IMAGE}:${BUILD_NUMBER}
-                    docker tag peacechouaib/crud_hr_app:latest ${DOCKER_IMAGE}:latest
+                    docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
+                    docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
                 '''
                 echo 'Docker image built'
             }
@@ -122,19 +131,6 @@ pipeline {
                 echo 'Pushed to Docker Hub'
             }
         }
-
-        stage('Deploy with Docker Compose') {
-            when { branch 'main' }
-            steps {
-                sh '''
-                    docker-compose -f compose.yaml down
-                    docker-compose -f compose.yaml pull
-                    docker-compose -f compose.yaml up -d
-                    echo "Deployment complete!"
-                '''
-                echo 'Deployed successfully'
-            }
-        }
     }
 
     post {
@@ -146,7 +142,8 @@ pipeline {
         }
         always {
             sh '''
-                docker-compose -f compose.yaml down -v 2>/dev/null || true
+                docker stop crud_hr_postgres 2>/dev/null || true
+                docker rm crud_hr_postgres 2>/dev/null || true
                 rm -rf venv || true
             '''
             echo 'Cleanup done'
