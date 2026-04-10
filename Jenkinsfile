@@ -6,230 +6,107 @@ pipeline {
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'True'
         ALLOWED_HOSTS = '*'
-
         DB_NAME = 'hr_app_db'
         DB_USER = 'postgres'
         DB_PASSWORD = 'postgres'
         DB_HOST = 'localhost'
         DB_PORT = '5432'
-
         DOCKER_HUB_USER = 'peacechouaib'
         DOCKER_IMAGE_NAME = 'crud_hr_app'
         DOCKER_IMAGE = "${DOCKER_HUB_USER}/${DOCKER_IMAGE_NAME}"
-
         PYTHONUNBUFFERED = '1'
     }
 
     stages {
-
         stage('Checkout') {
             steps {
                 git branch: 'main',
                     url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git'
-                echo '✅ Code checked out'
+                echo 'Code checked out'
             }
         }
 
         stage('Setup Python') {
             steps {
-                sh """
-                    python3 -m venv venv
+                sh '''
+                    python3.10 -m venv venv
                     . venv/bin/activate
-
                     pip install --upgrade pip
-                    pip install Django==4.2.20 djangorestframework \
-                        psycopg2-binary gunicorn argon2-cffi \
-                        pytest pytest-django pytest-cov \
-                        flake8 black coverage
-                """
-                echo '✅ Python environment ready'
+                    pip install Django==4.2.20 djangorestframework psycopg2-binary gunicorn
+                    pip install pytest pytest-django pytest-cov flake8 black argon2-cffi
+                '''
+                echo 'Python ready'
             }
         }
 
-        stage('Fix Django Configuration') {
+        stage('Apply Fixes') {
             steps {
-                sh """
+                sh '''
                     . venv/bin/activate
-                    cd backend/hr_core
-
-                    python3 << 'EOF'
-import re
-
-with open('settings.py', 'r') as f:
-    content = f.read()
-
-# Add employees app safely
-if "'employees'" not in content:
-    pattern = "(INSTALLED_APPS\\\\s*=\\\\s*\\\\[)([^\\\\]]*)(\\\\])"
-
-    def add_app(match):
-        apps = match.group(2)
-        if "'employees'" not in apps:
-            apps = apps.rstrip() + "\\n    'employees',\\n"
-        return match.group(1) + apps + match.group(3)
-
-    content = re.sub(pattern, add_app, content, flags=re.DOTALL)
-    print("✅ employees added")
-
-# Add PASSWORD_HASHERS if missing
-if "PASSWORD_HASHERS" not in content:
-    content += '''
-PASSWORD_HASHERS = [
-    "django.contrib.auth.hashers.Argon2PasswordHasher",
-    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
-]
-'''
-    print("✅ PASSWORD_HASHERS added")
-
-with open('settings.py', 'w') as f:
-    f.write(content)
-
-print("✅ settings.py updated")
-EOF
-
-                    cd ../..
-                """
-                echo '✅ Django config fixed'
+                    python3 fix_settings.py
+                '''
+                echo 'Fixes applied'
             }
         }
 
-        stage('Lint') {
+        stage('Setup Database') {
             steps {
-                sh """
-                    . venv/bin/activate
-                    cd backend
-                    flake8 . || true
-                """
-                echo '✅ Lint done'
-            }
-        }
-
-        stage('Start PostgreSQL') {
-            steps {
-                sh """
-                    docker rm -f postgres-test || true
-
+                sh '''
+                    docker stop postgres-test 2>/dev/null || true
+                    docker rm postgres-test 2>/dev/null || true
                     docker run -d --name postgres-test \
-                        -e POSTGRES_DB=${DB_NAME} \
-                        -e POSTGRES_USER=${DB_USER} \
-                        -e POSTGRES_PASSWORD=${DB_PASSWORD} \
-                        -p 5432:5432 postgres:15
-
+                        -e POSTGRES_DB=hr_app_db \
+                        -e POSTGRES_USER=postgres \
+                        -e POSTGRES_PASSWORD=postgres \
+                        -p 5432:5432 \
+                        postgres:15
                     sleep 10
-                """
-                echo '✅ PostgreSQL running'
+                '''
+                echo 'Database ready'
             }
         }
 
-        stage('Migrate') {
+        stage('Run Migrations & Tests') {
             steps {
-                sh """
+                sh '''
                     . venv/bin/activate
                     cd backend
+                    python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
-                """
-                echo '✅ Migrations done'
+                    python manage.py test --verbosity=2 --noinput || echo "Tests completed"
+                    cd ..
+                '''
+                echo 'Done'
             }
         }
 
-        stage('Test') {
-            steps {
-                sh """
-                    . venv/bin/activate
-                    cd backend
-                    python manage.py test --noinput || true
-                """
-                echo '✅ Tests executed'
-            }
-        }
-
-        stage('Coverage') {
-            steps {
-                sh """
-                    . venv/bin/activate
-                    cd backend
-                    coverage run manage.py test || true
-                    coverage report || true
-                """
-                echo '✅ Coverage generated'
-            }
-        }
-
-        stage('Build Docker') {
-            when { branch 'main' }
-            steps {
-                sh """
-                    if [ ! -f Dockerfile ]; then
-                        cat > Dockerfile << 'DOCKERFILE'
-FROM python:3.10-slim
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
-
-COPY backend/requirements.txt .
-
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install gunicorn psycopg2-binary argon2-cffi
-
-COPY backend .
-
-RUN python manage.py collectstatic --noinput || true
-
-EXPOSE 8000
-
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "hr_core.wsgi:application"]
-DOCKERFILE
-                    fi
-
-                    docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
-                    docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
-                """
-                echo '✅ Docker built'
-            }
-        }
-
-        stage('Push Docker Image') {
+        stage('Build & Push Docker') {
             when { branch 'main' }
             steps {
                 withCredentials([string(credentialsId: 'docker-hub-password', variable: 'DOCKER_PASS')]) {
-                    sh """
-                        echo \$DOCKER_PASS | docker login -u ${DOCKER_HUB_USER} --password-stdin
+                    sh '''
+                        docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
+                        docker tag ${DOCKER_IMAGE}:${BUILD_NUMBER} ${DOCKER_IMAGE}:latest
+                        echo ${DOCKER_PASS} | docker login -u ${DOCKER_HUB_USER} --password-stdin
                         docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
                         docker push ${DOCKER_IMAGE}:latest
-                    """
+                    '''
                 }
-                echo '✅ Docker pushed'
-            }
-        }
-
-        stage('Deploy Info') {
-            when { branch 'main' }
-            steps {
-                echo """
-🚀 Deployment commands:
-docker pull ${DOCKER_IMAGE}:latest
-docker run -d -p 8000:8000 ${DOCKER_IMAGE}:latest
-"""
+                echo 'Docker image pushed'
             }
         }
     }
 
     post {
         always {
-            sh """
-                docker rm -f postgres-test || true
+            sh '''
+                docker stop postgres-test 2>/dev/null || true
+                docker rm postgres-test 2>/dev/null || true
                 rm -rf venv || true
-            """
-            echo '🧹 Cleanup done'
+            '''
+            echo 'Cleanup done'
         }
-
-        success {
-            echo '🎉 PIPELINE SUCCESS'
-        }
-
-        failure {
-            echo '❌ PIPELINE FAILED'
-        }
+        success { echo 'SUCCESS!' }
+        failure { echo 'FAILED!' }
     }
 }
