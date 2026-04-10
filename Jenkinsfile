@@ -2,20 +2,17 @@ pipeline {
     agent any
     
     environment {
-        // إعدادات Django
         DJANGO_SETTINGS_MODULE = 'config.settings.production'
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'False'
         ALLOWED_HOSTS = 'localhost,127.0.0.1'
         
-        // إعدادات قاعدة البيانات
         DB_NAME = 'hr_app_db'
         DB_USER = 'postgres'
         DB_PASSWORD = 'postgres'
         DB_HOST = 'localhost'
         DB_PORT = '5432'
         
-        // إعدادات Python
         PYTHONUNBUFFERED = '1'
     }
     
@@ -31,21 +28,15 @@ pipeline {
         stage('🐍 تجهيز Python والبيئة الافتراضية') {
             steps {
                 sh '''
-                    # إنشاء بيئة افتراضية باستخدام Python 3.10
                     python3.10 -m venv venv
-                    source venv/bin/activate
+                    . venv/bin/activate
                     
-                    # تحديث pip
                     pip install --upgrade pip
                     pip install wheel
                     
-                    # تثبيت Django والمكتبات المطلوبة
                     pip install django djangorestframework django-cors-headers psycopg2-binary gunicorn
-                    
-                    # تثبيت أدوات الاختبار والجودة
                     pip install pytest pytest-django pytest-cov flake8 black
                     
-                    # تثبيت المتطلبات إذا وجدت
                     if [ -f "requirements.txt" ]; then
                         pip install -r requirements.txt
                     fi
@@ -61,13 +52,9 @@ pipeline {
         stage('🔍 فحص جودة الكود') {
             steps {
                 sh '''
-                    source venv/bin/activate
-                    
-                    # فحص الكود
+                    . venv/bin/activate
                     echo "🔍 جاري فحص الكود..."
                     flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-                    
-                    # فحص التنسيق
                     echo "🎨 جاري فحص التنسيق..."
                     black --check . --diff || echo "⚠️ تحتاج بعض الملفات إلى تنسيق"
                 '''
@@ -78,15 +65,15 @@ pipeline {
         stage('🗄️ تشغيل قاعدة البيانات للاختبار') {
             steps {
                 sh '''
-                    # استخدام Docker لتشغيل PostgreSQL
                     if command -v docker &> /dev/null; then
+                        docker stop postgres-test 2>/dev/null || true
+                        docker rm postgres-test 2>/dev/null || true
                         docker run -d --name postgres-test \
                             -e POSTGRES_DB=hr_app_db \
                             -e POSTGRES_USER=postgres \
                             -e POSTGRES_PASSWORD=postgres \
                             -p 5432:5432 \
-                            postgres:15 || true
-                        
+                            postgres:15
                         echo "⏳ انتظار تشغيل قاعدة البيانات..."
                         sleep 10
                     else
@@ -102,9 +89,7 @@ pipeline {
         stage('🔄 تنفيذ ترحيلات قاعدة البيانات') {
             steps {
                 sh '''
-                    source venv/bin/activate
-                    
-                    # تنفيذ الترحيلات
+                    . venv/bin/activate
                     if [ -d "backend" ]; then
                         cd backend
                         python manage.py makemigrations --noinput || true
@@ -122,9 +107,7 @@ pipeline {
         stage('🧪 تشغيل الاختبارات') {
             steps {
                 sh '''
-                    source venv/bin/activate
-                    
-                    # تشغيل الاختبارات
+                    . venv/bin/activate
                     if [ -d "backend" ]; then
                         cd backend
                         python manage.py test --verbosity=2 --noinput
@@ -137,14 +120,13 @@ pipeline {
             }
         }
         
-        stage('🐳 بناء Docker Image (اختياري)') {
+        stage('🐳 بناء Docker Image') {
             when {
                 branch 'main'
                 expression { return fileExists('compose.yaml') }
             }
             steps {
                 sh '''
-                    # بناء صورة Docker
                     docker-compose -f compose.yaml build
                     docker tag crud-hr-app-web:latest bherradi/crud-hr-app:${BUILD_NUMBER}
                 '''
@@ -161,13 +143,9 @@ pipeline {
             echo '❌❌❌ فشل البناء! راجع السجلات أعلاه ❌❌❌'
         }
         always {
-            // تنظيف
             sh '''
-                # إيقاف حاوية PostgreSQL
                 docker stop postgres-test 2>/dev/null || true
                 docker rm postgres-test 2>/dev/null || true
-                
-                # حذف البيئة الافتراضية
                 rm -rf venv || true
             '''
             echo '🧹 تم التنظيف'
