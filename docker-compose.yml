@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: crud_hr_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ytech_hr
+      POSTGRES_USER: hr_app_user
+      POSTGRES_PASSWORD: LocalPostgres12345!
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hr_app_user -d ytech_hr"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  web:
+    image: peacechouaib/crud_hr_app:latest
+    container_name: crud_hr_web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=hr_core.settings
+      - DEBUG=False
+      - DATABASE_URL=postgresql://hr_app_user:LocalPostgres12345!@postgres:5432/ytech_hr
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
