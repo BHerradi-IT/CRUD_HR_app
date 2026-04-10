@@ -2,8 +2,7 @@ pipeline {
     agent any
     
     environment {
-        # تغيير مسار الإعدادات ليتناسب مع هيكل المشروع
-        DJANGO_SETTINGS_MODULE = 'backend.config.settings'  # أو حسب هيكل مشروعك
+        DJANGO_SETTINGS_MODULE = 'config.settings'
         SECRET_KEY = 'django-insecure-jenkins-build-key-2024'
         DEBUG = 'True'
         ALLOWED_HOSTS = 'localhost,127.0.0.1'
@@ -18,33 +17,36 @@ pipeline {
     }
     
     stages {
-        stage('📥 سحب الكود من GitHub') {
+        stage('Checkout') {
             steps {
                 git branch: 'main', 
                     url: 'https://github.com/BHerradi-IT/CRUD_HR_app.git'
-                echo '✅ تم سحب الكود من المستودع'
+                echo 'Code checked out successfully'
             }
         }
         
-        stage('🔍 استكشاف هيكل المشروع') {
+        stage('Explore Project Structure') {
             steps {
                 sh '''
-                    echo "📁 هيكل المشروع:"
+                    echo "Project structure:"
                     ls -la
                     echo ""
-                    echo "📁 محتويات مجلد backend:"
-                    ls -la backend/ || echo "backend folder not found"
+                    echo "Looking for manage.py:"
+                    find . -name "manage.py" -type f
                     echo ""
-                    echo "📁 محتويات مجلد config:"
-                    ls -la config/ || echo "config folder not found"
-                    echo ""
-                    echo "🔍 البحث عن ملف settings.py:"
+                    echo "Looking for settings.py:"
                     find . -name "settings.py" -type f
+                    echo ""
+                    echo "Backend folder content:"
+                    ls -la backend/ 2>/dev/null || echo "backend folder not found"
+                    echo ""
+                    echo "Config folder content:"
+                    ls -la config/ 2>/dev/null || echo "config folder not found"
                 '''
             }
         }
         
-        stage('🐍 تجهيز Python والبيئة الافتراضية') {
+        stage('Setup Python') {
             steps {
                 sh '''
                     python3.10 -m venv venv
@@ -53,10 +55,10 @@ pipeline {
                     pip install --upgrade pip
                     pip install wheel
                     
-                    # تثبيت Django
                     pip install Django==4.2.20
+                    pip install djangorestframework psycopg2-binary gunicorn
+                    pip install pytest pytest-django pytest-cov flake8 black
                     
-                    # تثبيت باقي المتطلبات
                     if [ -f "requirements.txt" ]; then
                         pip install -r requirements.txt || true
                     fi
@@ -65,63 +67,24 @@ pipeline {
                         pip install -r backend/requirements.txt || true
                     fi
                     
-                    # تثبيت المكتبات الأساسية
-                    pip install djangorestframework django-cors-headers psycopg2-binary gunicorn
-                    pip install pytest pytest-django pytest-cov flake8 black
-                    
-                    echo "📦 المكتبات المثبتة:"
-                    pip list | grep -E "Django|rest|psycopg"
+                    echo "Installed packages:"
+                    pip list | grep -E "Django|rest"
                 '''
-                echo '✅ تم تجهيز البيئة الافتراضية'
+                echo 'Python environment ready'
             }
         }
         
-        stage('🔧 إعداد متغيرات Django') {
+        stage('Lint Code') {
             steps {
                 sh '''
                     . venv/bin/activate
-                    
-                    # تحديد مسار الإعدادات الصحيح
-                    if [ -f "backend/config/settings.py" ]; then
-                        export DJANGO_SETTINGS_MODULE="backend.config.settings"
-                        echo "✅ باستخدام: backend.config.settings"
-                    elif [ -f "config/settings.py" ]; then
-                        export DJANGO_SETTINGS_MODULE="config.settings"
-                        echo "✅ باستخدام: config.settings"
-                    elif [ -f "backend/settings.py" ]; then
-                        export DJANGO_SETTINGS_MODULE="backend.settings"
-                        echo "✅ باستخدام: backend.settings"
-                    else
-                        echo "❌ لم يتم العثور على settings.py"
-                        find . -name "settings.py" -type f
-                        exit 1
-                    fi
-                    
-                    # حفظ المسار في ملف .env
-                    echo "DJANGO_SETTINGS_MODULE=$DJANGO_SETTINGS_MODULE" > .env
-                    echo "SECRET_KEY=django-insecure-jenkins-build-key-2024" >> .env
-                    echo "DEBUG=True" >> .env
-                    
-                    cat .env
-                '''
-                echo '✅ تم إعداد متغيرات Django'
-            }
-        }
-        
-        stage('🔍 فحص جودة الكود') {
-            steps {
-                sh '''
-                    . venv/bin/activate
-                    source .env || true
-                    
-                    echo "🔍 جاري فحص الكود..."
                     flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
                 '''
-                echo '✅ تم اجتياز فحص الجودة'
+                echo 'Linting completed'
             }
         }
         
-        stage('🗄️ تشغيل قاعدة البيانات للاختبار') {
+        stage('Start Database') {
             steps {
                 sh '''
                     if command -v docker &> /dev/null; then
@@ -133,67 +96,61 @@ pipeline {
                             -e POSTGRES_PASSWORD=postgres \
                             -p 5432:5432 \
                             postgres:15
-                        echo "⏳ انتظار تشغيل قاعدة البيانات..."
                         sleep 10
                     else
-                        echo "⚠️ Docker غير مثبت، استخدام SQLite"
+                        echo "Docker not available, using SQLite"
                     fi
                 '''
-                echo '✅ قاعدة البيانات جاهزة'
+                echo 'Database ready'
             }
         }
         
-        stage('🔄 تنفيذ ترحيلات قاعدة البيانات') {
+        stage('Run Migrations') {
             steps {
                 sh '''
                     . venv/bin/activate
-                    source .env || true
                     
-                    cd backend
-                    
-                    # عرض معلومات Django
-                    python manage.py --version
-                    echo "DJANGO_SETTINGS_MODULE: $DJANGO_SETTINGS_MODULE"
-                    
-                    # محاولة التحقق من الإعدادات
-                    python -c "import django; django.setup(); print('✅ Django setup OK')" || {
-                        echo "❌ مشكلة في إعدادات Django"
-                        echo "الملفات الموجودة:"
-                        ls -la
+                    if [ -f "backend/manage.py" ]; then
+                        cd backend
+                        python manage.py makemigrations --noinput || true
+                        python manage.py migrate --noinput
+                        cd ..
+                    elif [ -f "manage.py" ]; then
+                        python manage.py makemigrations --noinput || true
+                        python manage.py migrate --noinput
+                    else
+                        echo "manage.py not found"
                         exit 1
-                    }
-                    
-                    # تنفيذ الترحيلات
-                    python manage.py makemigrations --noinput || true
-                    python manage.py migrate --noinput
-                    
-                    cd ..
+                    fi
                 '''
-                echo '✅ تم تنفيذ الترحيلات'
+                echo 'Migrations completed'
             }
         }
         
-        stage('🧪 تشغيل الاختبارات') {
+        stage('Run Tests') {
             steps {
                 sh '''
                     . venv/bin/activate
-                    source .env || true
                     
-                    cd backend
-                    python manage.py test --verbosity=2 --noinput || echo "⚠️ لا توجد اختبارات أو فشلت"
-                    cd ..
+                    if [ -f "backend/manage.py" ]; then
+                        cd backend
+                        python manage.py test --verbosity=2 --noinput || echo "No tests found or tests failed"
+                        cd ..
+                    elif [ -f "manage.py" ]; then
+                        python manage.py test --verbosity=2 --noinput || echo "No tests found or tests failed"
+                    fi
                 '''
-                echo '✅ اكتملت مرحلة الاختبارات'
+                echo 'Tests completed'
             }
         }
     }
     
     post {
         success {
-            echo '🎉🎉🎉 نجاح البناء! 🎉🎉🎉'
+            echo 'Pipeline completed successfully!'
         }
         failure {
-            echo '❌❌❌ فشل البناء! راجع السجلات أعلاه ❌❌❌'
+            echo 'Pipeline failed! Check logs above.'
         }
         always {
             sh '''
@@ -201,7 +158,7 @@ pipeline {
                 docker rm postgres-test 2>/dev/null || true
                 rm -rf venv || true
             '''
-            echo '🧹 تم التنظيف'
+            echo 'Cleanup completed'
         }
     }
 }
