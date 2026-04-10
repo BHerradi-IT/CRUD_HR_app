@@ -8,7 +8,7 @@ pipeline {
         DEBUG = 'False'
         ALLOWED_HOSTS = 'localhost,127.0.0.1'
         
-        // إعدادات قاعدة البيانات (PostgreSQL من compose.yaml)
+        // إعدادات قاعدة البيانات
         DB_NAME = 'hr_app_db'
         DB_USER = 'postgres'
         DB_PASSWORD = 'postgres'
@@ -31,8 +31,8 @@ pipeline {
         stage('🐍 تجهيز Python والبيئة الافتراضية') {
             steps {
                 sh '''
-                    # إنشاء بيئة افتراضية
-                    python3 -m venv venv
+                    # إنشاء بيئة افتراضية باستخدام Python 3.10
+                    python3.10 -m venv venv
                     source venv/bin/activate
                     
                     # تحديث pip
@@ -45,30 +45,29 @@ pipeline {
                     # تثبيت أدوات الاختبار والجودة
                     pip install pytest pytest-django pytest-cov flake8 black
                     
-                    # تثبيت أي متطلبات إضافية من ملف requirements.txt إذا وجد
+                    # تثبيت المتطلبات إذا وجدت
                     if [ -f "requirements.txt" ]; then
                         pip install -r requirements.txt
                     fi
                     
-                    # تثبيت متطلبات backend إذا كان هناك مجلد منفصل
                     if [ -f "backend/requirements.txt" ]; then
                         pip install -r backend/requirements.txt
                     fi
                 '''
-                echo '✅ تم تجهيز البيئة الافتراضية وتثبيت المكتبات'
+                echo '✅ تم تجهيز البيئة الافتراضية'
             }
         }
         
-        stage('🔍 فحص جودة الكود (Linting)') {
+        stage('🔍 فحص جودة الكود') {
             steps {
                 sh '''
                     source venv/bin/activate
                     
-                    # فحص باستخدام flake8
+                    # فحص الكود
                     echo "🔍 جاري فحص الكود..."
                     flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
                     
-                    # فحص التنسيق باستخدام black
+                    # فحص التنسيق
                     echo "🎨 جاري فحص التنسيق..."
                     black --check . --diff || echo "⚠️ تحتاج بعض الملفات إلى تنسيق"
                 '''
@@ -76,16 +75,22 @@ pipeline {
             }
         }
         
-        stage('🗄️ إعداد قاعدة البيانات للاختبار') {
+        stage('🗄️ تشغيل قاعدة البيانات للاختبار') {
             steps {
                 sh '''
-                    # تشغيل PostgreSQL باستخدام Docker (من compose.yaml)
+                    # استخدام Docker لتشغيل PostgreSQL
                     if command -v docker &> /dev/null; then
-                        docker-compose -f compose.yaml up -d db
+                        docker run -d --name postgres-test \
+                            -e POSTGRES_DB=hr_app_db \
+                            -e POSTGRES_USER=postgres \
+                            -e POSTGRES_PASSWORD=postgres \
+                            -p 5432:5432 \
+                            postgres:15 || true
+                        
                         echo "⏳ انتظار تشغيل قاعدة البيانات..."
                         sleep 10
                     else
-                        echo "⚠️ Docker غير مثبت، استخدام SQLite للاختبارات"
+                        echo "⚠️ Docker غير مثبت، استخدام SQLite"
                         export DB_ENGINE='django.db.backends.sqlite3'
                         export DB_NAME='db.sqlite3'
                     fi
@@ -99,19 +104,18 @@ pipeline {
                 sh '''
                     source venv/bin/activate
                     
-                    # الانتقال إلى مجلد backend إذا كان المشروع منظماً هناك
+                    # تنفيذ الترحيلات
                     if [ -d "backend" ]; then
                         cd backend
+                        python manage.py makemigrations --noinput || true
+                        python manage.py migrate --noinput
+                        cd ..
+                    else
+                        python manage.py makemigrations --noinput || true
+                        python manage.py migrate --noinput
                     fi
-                    
-                    # إنشاء الترحيلات وتنفيذها
-                    python manage.py makemigrations --noinput || true
-                    python manage.py migrate --noinput
-                    
-                    # العودة إلى المجلد الرئيسي
-                    cd ..
                 '''
-                echo '✅ تم تنفيذ الترحيلات بنجاح'
+                echo '✅ تم تنفيذ الترحيلات'
             }
         }
         
@@ -120,7 +124,7 @@ pipeline {
                 sh '''
                     source venv/bin/activate
                     
-                    # تشغيل الاختبارات مع تغطية الكود
+                    # تشغيل الاختبارات
                     if [ -d "backend" ]; then
                         cd backend
                         python manage.py test --verbosity=2 --noinput
@@ -128,90 +132,40 @@ pipeline {
                     else
                         python manage.py test --verbosity=2 --noinput
                     fi
-                    
-                    # أو استخدام pytest إذا كان مفضلاً
-                    # pytest --cov=. --cov-report=xml --cov-report=term
                 '''
-                echo '✅ اجتازت جميع الاختبارات بنجاح'
+                echo '✅ اجتازت جميع الاختبارات'
             }
         }
         
-        stage('🐳 بناء Docker Image') {
+        stage('🐳 بناء Docker Image (اختياري)') {
             when {
                 branch 'main'
+                expression { return fileExists('compose.yaml') }
             }
             steps {
-                script {
-                    if (fileExists('compose.yaml') || fileExists('Dockerfile')) {
-                        sh '''
-                            # بناء الصورة باستخدام docker-compose
-                            docker-compose -f compose.yaml build
-                            
-                            # وضع علامة (tag) على الصورة
-                            docker tag crud-hr-app-web:latest bherradi/crud-hr-app:${BUILD_NUMBER}
-                            docker tag crud-hr-app-web:latest bherradi/crud-hr-app:latest
-                        '''
-                        echo '✅ تم بناء صورة Docker بنجاح'
-                    } else {
-                        echo '⚠️ لا يوجد Dockerfile أو compose.yaml، تخطي مرحلة البناء'
-                    }
-                }
-            }
-        }
-        
-        stage('🚀 نشر إلى الخادم (اختياري)') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    // يمكنك إضافة خطوات النشر حسب احتياجاتك
-                    // مثال: النشر إلى Docker Hub
-                    // withCredentials([string(credentialsId: 'docker-hub-password', variable: 'DOCKER_PASS')]) {
-                    //     sh '''
-                    //         echo $DOCKER_PASS | docker login -u bherradi --password-stdin
-                    //         docker push bherradi/crud-hr-app:latest
-                    //     '''
-                    // }
-                    
-                    // أو النشر إلى خادم عبر SSH
-                    // sh '''
-                    //     ssh user@your-server.com "cd /app && docker-compose pull && docker-compose up -d"
-                    // '''
-                    
-                    echo '✅ تم النشر (تم تخطي النشر التلقائي - أضف إعداداتك هنا)'
-                }
+                sh '''
+                    # بناء صورة Docker
+                    docker-compose -f compose.yaml build
+                    docker tag crud-hr-app-web:latest bherradi/crud-hr-app:${BUILD_NUMBER}
+                '''
+                echo '✅ تم بناء صورة Docker'
             }
         }
     }
     
     post {
         success {
-            echo '🎉🎉🎉 Pipeline completed successfully! 🎉🎉🎉'
-            // إرسال إشعار نجاح (اختياري)
-            // emailext (
-            //     subject: "✅ نجاح البناء: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-            //     body: "البناء رقم ${env.BUILD_NUMBER} اكتمل بنجاح!\nالرابط: ${env.BUILD_URL}",
-            //     to: 'team@example.com'
-            // )
+            echo '🎉🎉🎉 نجاح البناء! 🎉🎉🎉'
         }
         failure {
-            echo '❌❌❌ Pipeline failed! ❌❌❌'
-            echo 'يرجى مراجعة السجلات أعلاه لمعرفة سبب الفشل'
-            // إرسال إشعار فشل (اختياري)
-            // emailext (
-            //     subject: "❌ فشل البناء: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-            //     body: "فشل البناء رقم ${env.BUILD_NUMBER}\nالرابط: ${env.BUILD_URL}\nيرجى مراجعة الأخطاء.",
-            //     to: 'team@example.com'
-            // )
+            echo '❌❌❌ فشل البناء! راجع السجلات أعلاه ❌❌❌'
         }
         always {
-            // تنظيف البيئة
+            // تنظيف
             sh '''
-                # إيقاف حاويات Docker
-                if command -v docker &> /dev/null; then
-                    docker-compose -f compose.yaml down 2>/dev/null || true
-                fi
+                # إيقاف حاوية PostgreSQL
+                docker stop postgres-test 2>/dev/null || true
+                docker rm postgres-test 2>/dev/null || true
                 
                 # حذف البيئة الافتراضية
                 rm -rf venv || true
