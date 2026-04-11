@@ -21,17 +21,21 @@ services:
     build: .
     container_name: hr_app
     restart: always
+
     environment:
       DATABASE_URL: postgres://hr_app_user:LocalPostgres12345!@postgres:5432/ytech_hr
       DJANGO_DEBUG: "True"
       DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost"
-command: >
-  sh -c "
-  python backend/manage.py migrate &&
-  python backend/manage.py runserver 0.0.0.0:8000
-  "
+
+    command: >
+      sh -c "
+      python backend/manage.py migrate &&
+      python backend/manage.py runserver 0.0.0.0:8000
+      "
+
     ports:
       - "8000:8000"
+
     depends_on:
       postgres:
         condition: service_healthy
