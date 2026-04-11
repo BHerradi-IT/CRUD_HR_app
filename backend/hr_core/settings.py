@@ -1,10 +1,4 @@
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": "ytech_hr",
-        "USER": "hr_app_user",
-        "PASSWORD": "LocalPostgres12345!",
-        "HOST": "postgres",
-        "PORT": "5432",
-    }
-}
+ALLOWED_HOSTS = os.getenv(
+    "DJANGO_ALLOWED_HOSTS",
+    "localhost,127.0.0.1,0.0.0.0"
+).split(",")
