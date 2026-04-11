@@ -3,8 +3,6 @@ pipeline {
 
     environment {
         IMAGE_NAME = "crud_hr_app-web"
-        CONTAINER_WEB = "hr_app"
-        CONTAINER_DB = "hr_postgres"
     }
 
     stages {
@@ -36,7 +34,7 @@ pipeline {
                 sh '''
                 echo "Waiting for PostgreSQL..."
 
-                until docker exec $CONTAINER_DB pg_isready -U hr_app_user -d ytech_hr; do
+                until docker compose exec postgres pg_isready -U hr_app_user -d ytech_hr; do
                   echo "Postgres not ready yet..."
                   sleep 2
                 done
@@ -49,7 +47,7 @@ pipeline {
         stage('Run Migrations') {
             steps {
                 sh '''
-                docker exec $CONTAINER_WEB python backend/manage.py migrate
+                docker compose exec web python backend/manage.py migrate
                 '''
             }
         }
@@ -57,7 +55,7 @@ pipeline {
         stage('Seed Data (Optional)') {
             steps {
                 sh '''
-                docker exec $CONTAINER_WEB python backend/manage.py seed_demo || true
+                docker compose exec web python backend/manage.py seed_demo || true
                 '''
             }
         }
@@ -65,7 +63,7 @@ pipeline {
         stage('Run App') {
             steps {
                 sh '''
-                docker exec -d $CONTAINER_WEB python backend/manage.py runserver 0.0.0.0:8000
+                docker compose exec -d web python backend/manage.py runserver 0.0.0.0:8000
                 '''
             }
         }
