@@ -3,6 +3,7 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15
+    container_name: hr_postgres   # ✅ FIX
     restart: always
 
     environment:
@@ -21,12 +22,13 @@ services:
 
   web:
     build: .
+    container_name: hr_app   # ✅ FIX
     restart: always
 
     environment:
       DATABASE_URL: postgres://hr_app_user:LocalPostgres12345!@postgres:5432/ytech_hr
       DJANGO_DEBUG: "1"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0,192.168.142.142"
 
     ports:
       - "8000:8000"
