@@ -2,8 +2,9 @@ pipeline {
     agent any
 
     environment {
+        APP_NAME = "crud_hr_app"
         IMAGE_NAME = "hr_app"
-        DOCKER_HUB_REPO = "YOUR_DOCKERHUB_USERNAME/crud_hr_app"
+        DOCKER_HUB_REPO = "peacechouaib/crud_hr_app"
         CONTAINER_WEB = "hr_app"
         CONTAINER_DB = "hr_postgres"
         TAG = "${BUILD_NUMBER}"
@@ -11,17 +12,16 @@ pipeline {
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout Source Code') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Code Quality (Basic Lint)') {
+        stage('Code Quality Check') {
             steps {
                 sh '''
-                echo "Running basic Python checks..."
-                python3 --version || true
+                echo "Running Python Lint..."
                 pip install flake8 || true
                 flake8 backend || true
                 '''
@@ -31,6 +31,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
+                echo "Building Docker image..."
                 docker build -t $IMAGE_NAME:$TAG .
                 docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
                 docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
@@ -42,15 +43,16 @@ pipeline {
             steps {
                 sh '''
                 if command -v trivy >/dev/null 2>&1; then
+                    echo "Running Trivy scan..."
                     trivy image $IMAGE_NAME:$TAG
                 else
-                    echo "Trivy not installed, skipping scan"
+                    echo "Trivy not installed, skipping security scan"
                 fi
                 '''
             }
         }
 
-        stage('Login to Docker Hub') {
+        stage('Docker Login') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
                     sh '''
@@ -60,18 +62,20 @@ pipeline {
             }
         }
 
-        stage('Push Image') {
+        stage('Push Image to Docker Hub') {
             steps {
                 sh '''
+                echo "Pushing image to Docker Hub..."
                 docker push $DOCKER_HUB_REPO:$TAG
                 docker push $DOCKER_HUB_REPO:latest
                 '''
             }
         }
 
-        stage('Deploy (Docker Compose)') {
+        stage('Deploy Containers') {
             steps {
                 sh '''
+                echo "Starting containers..."
                 docker compose up -d --build
                 '''
             }
@@ -83,24 +87,25 @@ pipeline {
                 echo "Waiting for PostgreSQL..."
 
                 until docker exec $CONTAINER_DB pg_isready -U hr_app_user -d ytech_hr; do
-                  echo "Postgres not ready..."
-                  sleep 2
+                    echo "Postgres not ready yet..."
+                    sleep 2
                 done
 
-                echo "PostgreSQL is ready ✔"
+                echo "PostgreSQL is READY ✔"
                 '''
             }
         }
 
-        stage('Run Migrations') {
+        stage('Run Database Migrations') {
             steps {
                 sh '''
+                echo "Running migrations..."
                 docker exec $CONTAINER_WEB python backend/manage.py migrate
                 '''
             }
         }
 
-        stage('Collect Static (optional)') {
+        stage('Collect Static Files') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py collectstatic --noinput || true
@@ -108,7 +113,7 @@ pipeline {
             }
         }
 
-        stage('Run Seed Data (optional)') {
+        stage('Seed Initial Data') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py seed_demo || true
@@ -120,11 +125,11 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline SUCCESS ✔"
+            echo "✅ Pipeline executed successfully"
         }
 
         failure {
-            echo "Pipeline FAILED ❌"
+            echo "❌ Pipeline failed"
             sh "docker logs $CONTAINER_WEB || true"
         }
 
