@@ -44,7 +44,7 @@ DEBUG = env_bool("DJANGO_DEBUG", True)
 
 ALLOW_NULL_ORIGIN_IN_DEBUG = env_bool("DJANGO_ALLOW_NULL_ORIGIN_IN_DEBUG", DEBUG)
 
-# ✅ FIX: ALLOWED_HOSTS for localhost + Jenkins + IP
+# ✅ مهم: السماح بالـ IP + localhost
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
@@ -52,7 +52,11 @@ ALLOWED_HOSTS = [
     "192.168.142.142"
 ]
 
-CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
+# ✅ FIX النهائي لمشكلة CSRF
+CSRF_TRUSTED_ORIGINS = env_list(
+    "DJANGO_CSRF_TRUSTED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000,http://192.168.142.142:8000"
+)
 
 USE_X_FORWARDED_HOST = env_bool("DJANGO_USE_X_FORWARDED_HOST", not DEBUG)
 
