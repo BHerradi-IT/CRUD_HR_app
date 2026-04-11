@@ -3,7 +3,6 @@ version: '3.8'
 services:
   postgres:
     image: postgres:15
-    container_name: hr_postgres
     restart: always
 
     environment:
@@ -22,7 +21,6 @@ services:
 
   web:
     build: .
-    container_name: hr_app
     restart: always
 
     environment:
