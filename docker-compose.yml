@@ -5,12 +5,15 @@ services:
     image: postgres:15
     container_name: hr_postgres
     restart: always
+
     environment:
       POSTGRES_DB: ytech_hr
       POSTGRES_USER: hr_app_user
       POSTGRES_PASSWORD: LocalPostgres12345!
+
     ports:
       - "5432:5432"
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hr_app_user -d ytech_hr"]
       interval: 5s
@@ -24,8 +27,8 @@ services:
 
     environment:
       DATABASE_URL: postgres://hr_app_user:LocalPostgres12345!@postgres:5432/ytech_hr
-      DJANGO_DEBUG: "True"
-      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost"
+      DJANGO_DEBUG: "1"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
 
     command: >
       sh -c "
