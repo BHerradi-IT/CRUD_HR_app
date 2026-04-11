@@ -1,26 +1,13 @@
-FROM python:3.10-slim
+FROM python:3.11
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+COPY backend/requirements.txt .
 
-COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install gunicorn psycopg2-binary argon2-cffi
 
-COPY backend /app/backend
-COPY config /app/config
+COPY . .
 
-ENV PYTHONUNBUFFERED=1
-ENV DJANGO_SETTINGS_MODULE=hr_core.settings
+ENV DATABASE_URL=postgresql://hr_app_user:LocalPostgres12345!@postgres:5432/ytech_hr
 
-WORKDIR /app/backend
-RUN python manage.py collectstatic --noinput || true
-
-EXPOSE 8000
-
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--threads", "2", "hr_core.wsgi:application"]
+CMD ["python", "backend/manage.py", "runserver", "0.0.0.0:8000"]
