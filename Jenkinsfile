@@ -2,12 +2,12 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "hr_app"
-        DOCKER_HUB_REPO = "YOUR_DOCKERHUB_USERNAME/crud_hr_app"
-        CONTAINER_WEB = "hr_app"
-        CONTAINER_DB = "hr_postgres"
-        TAG = "${BUILD_NUMBER}"
-    }
+    IMAGE_NAME = "hr_app"
+    DOCKER_HUB_REPO = "peacechouaib/crud_hr_app"
+    CONTAINER_WEB = "hr_app"
+    CONTAINER_DB = "hr_postgres"
+    TAG = "${BUILD_NUMBER}"
+}
 
     stages {
 
