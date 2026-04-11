@@ -30,15 +30,17 @@ services:
       DJANGO_DEBUG: "1"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,0.0.0.0"
 
-    command: >
-      sh -c "
-      python backend/manage.py migrate &&
-      python backend/manage.py runserver 0.0.0.0:8000
-      "
-
     ports:
       - "8000:8000"
 
     depends_on:
       postgres:
         condition: service_healthy
+
+    command: >
+      sh -c "
+      echo 'Waiting for database...' &&
+      sleep 5 &&
+      python backend/manage.py migrate &&
+      python backend/manage.py runserver 0.0.0.0:8000
+      "
