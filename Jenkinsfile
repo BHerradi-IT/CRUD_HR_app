@@ -56,17 +56,16 @@ pipeline {
         }
 
         stage('Security Scan (Trivy)') {
-            steps {
-                sh '''
-                if command -v trivy >/dev/null 2>&1; then
-                    echo "Running Trivy scan on built image..."
-                    trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || true
-                else
-                    echo "Trivy not installed" > $REPORT_FILE
-                fi
-                '''
-            }
-        }
+    steps {
+        sh '''
+        echo "Running Trivy scan on project image..."
+
+        trivy image $IMAGE_NAME:$TAG > trivy-report.txt
+
+        echo "Trivy scan completed ✔"
+        '''
+    }
+}
 
         stage('Send Trivy Report Email') {
             steps {
