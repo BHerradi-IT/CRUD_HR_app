@@ -17,9 +17,10 @@ services:
 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hr_app_user -d ytech_hr"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 20s   # ⭐ IMPORTANT FIX
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -44,7 +45,7 @@ services:
     command: >
       sh -c "
       echo 'Waiting for database...' &&
-      sleep 5 &&
+      sleep 10 &&
       python backend/manage.py migrate &&
       python backend/manage.py collectstatic --noinput || true &&
       python backend/manage.py runserver 0.0.0.0:8000
