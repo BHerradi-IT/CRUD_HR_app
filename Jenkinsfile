@@ -28,26 +28,26 @@ pipeline {
             }
         }
 
- stage('SonarQube Analysis') {
+        stage('SonarQube Analysis') {
             steps {
                 script {
                     sh '''
-                        echo "========== SonarQube Analysis Started =========="
-                        
-                        docker run --rm \
-                          -v $(pwd):/usr/src \
-                          -w /usr/src \
-                          sonarsource/sonar-scanner-cli:latest \
-                          sonar-scanner \
-                          -Dsonar.projectKey=hr_app \
-                          -Dsonar.projectName="hr_app" \
-                          -Dsonar.projectVersion=1.0 \
-                          -Dsonar.sources=frontend/src \
-                          -Dsonar.exclusions=**/node_modules/**,**/*.test.js \
-                          -Dsonar.host.url=${SONAR_HOST_URL} \
-                          -Dsonar.login=${SONAR_TOKEN}
-                        
-                        echo "✅ SonarQube analysis completed"
+                    echo "========== SonarQube Analysis Started =========="
+
+                    docker run --rm \
+                      -v $(pwd):/usr/src \
+                      -w /usr/src \
+                      sonarsource/sonar-scanner-cli:latest \
+                      sonar-scanner \
+                      -Dsonar.projectKey=hr_app \
+                      -Dsonar.projectName="hr_app" \
+                      -Dsonar.projectVersion=1.0 \
+                      -Dsonar.sources=backend \
+                      -Dsonar.exclusions=**/migrations/**,**/__pycache__/**,**/static/** \
+                      -Dsonar.host.url=${SONAR_HOST_URL} \
+                      -Dsonar.login=${SONAR_TOKEN}
+
+                    echo "SonarQube analysis completed ✔"
                     '''
                 }
             }
@@ -64,16 +64,16 @@ pipeline {
         }
 
         stage('Security Scan (Trivy)') {
-    steps {
-        sh '''
-        echo "Running Trivy scan on project image..."
+            steps {
+                sh '''
+                echo "Running Trivy scan..."
 
-        trivy image $IMAGE_NAME:$TAG > trivy-report.txt
+                trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || true
 
-        echo "Trivy scan completed ✔"
-        '''
-    }
-}
+                echo "Trivy scan completed ✔"
+                '''
+            }
+        }
 
         stage('Send Trivy Report Email') {
             steps {
@@ -169,7 +169,7 @@ pipeline {
             }
         }
 
-        stage('Seed Data (Optional)') {
+        stage('Seed Data') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py seed_demo || true
@@ -203,7 +203,7 @@ pipeline {
                 body: "Pipeline failed. Check Jenkins logs.",
                 to: "herraditech@gmail.com"
             )
-            sh "docker logs $CONTAINER_WEB || true"
+            sh "docker logs hr_app || true"
         }
 
         always {
