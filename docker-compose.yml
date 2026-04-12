@@ -1,9 +1,10 @@
 version: '3.8'
 
 services:
+
   postgres:
     image: postgres:15
-    container_name: hr_postgres   # ✅ FIX
+    container_name: hr_postgres
     restart: always
 
     environment:
@@ -20,9 +21,12 @@ services:
       timeout: 5s
       retries: 10
 
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   web:
     build: .
-    container_name: hr_app   # ✅ FIX
+    container_name: hr_app
     restart: always
 
     environment:
@@ -42,5 +46,9 @@ services:
       echo 'Waiting for database...' &&
       sleep 5 &&
       python backend/manage.py migrate &&
+      python backend/manage.py collectstatic --noinput || true &&
       python backend/manage.py runserver 0.0.0.0:8000
       "
+
+volumes:
+  postgres_data:
