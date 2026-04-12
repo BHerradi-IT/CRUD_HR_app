@@ -28,22 +28,19 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis (Optional)') {
-            steps {
-                sh '''
-                if command -v sonar-scanner >/dev/null 2>&1; then
-                    echo "Running SonarQube..."
-                    sonar-scanner \
-                      -Dsonar.projectKey=hr_app \
-                      -Dsonar.sources=backend \
-                      -Dsonar.host.url=http://localhost:9000 \
-                      -Dsonar.login=YOUR_SONAR_TOKEN
-                else
-                    echo "SonarQube not installed, skipping"
-                fi
-                '''
-            }
+       stage('SonarQube Analysis') {
+    steps {
+        withSonarQubeEnv('SonarQube') {
+            sh '''
+            sonar-scanner \
+              -Dsonar.projectKey=hr_app \
+              -Dsonar.sources=backend \
+              -Dsonar.host.url=http://192.168.142.142:9000 \
+              -Dsonar.login=YOUR_SONAR_TOKEN
+            '''
         }
+    }
+}
 
         stage('Build Docker Image') {
             steps {
