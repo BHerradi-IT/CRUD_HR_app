@@ -8,6 +8,9 @@ pipeline {
         CONTAINER_DB = "hr_postgres"
         TAG = "${BUILD_NUMBER}"
         REPORT_FILE = "trivy-report.txt"
+
+        // ✅ SonarQube URL الصحيح (تم إصلاح IP)
+        SONAR_HOST_URL = "http://192.168.142.143:9000"
     }
 
     stages {
@@ -18,7 +21,7 @@ pipeline {
             }
         }
 
-        stage('Code Quality (Lint)') {
+        stage('Lint Code') {
             steps {
                 sh '''
                 echo "Running Lint..."
@@ -44,10 +47,10 @@ pipeline {
                       -Dsonar.projectVersion=1.0 \
                       -Dsonar.sources=backend \
                       -Dsonar.exclusions=**/migrations/**,**/__pycache__/**,**/static/** \
-                      -Dsonar.host.url=http://192.168.142.142:9000 \
+                      -Dsonar.host.url=$SONAR_HOST_URL \
                       -Dsonar.login=$SONAR_TOKEN
 
-                    echo "Sonar analysis completed"
+                    echo "SonarQube analysis completed ✔"
                     '''
                 }
             }
@@ -56,6 +59,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 sh '''
+                echo "Building Docker image..."
                 docker build -t $IMAGE_NAME:$TAG .
                 docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:latest
                 '''
@@ -65,7 +69,28 @@ pipeline {
         stage('Security Scan (Trivy)') {
             steps {
                 sh '''
+                echo "Running Trivy scan..."
                 trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || echo "Trivy failed" > $REPORT_FILE
+                '''
+            }
+        }
+
+        stage('Send Trivy Report Email') {
+            steps {
+                emailext (
+                    subject: "🔐 Trivy Report - Build #${BUILD_NUMBER}",
+                    body: "Attached Trivy security scan report.",
+                    to: "herraditech@gmail.com",
+                    attachmentsPattern: "trivy-report.txt"
+                )
+            }
+        }
+
+        stage('Tag Image for Docker Hub') {
+            steps {
+                sh '''
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
                 '''
             }
         }
@@ -87,9 +112,7 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 sh '''
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
-
+                echo "Pushing image to Docker Hub..."
                 docker push $DOCKER_HUB_REPO:$TAG
                 docker push $DOCKER_HUB_REPO:latest
                 '''
@@ -99,6 +122,7 @@ pipeline {
         stage('Deploy Containers') {
             steps {
                 sh '''
+                echo "Deploying containers..."
                 docker compose up -d --build
                 '''
             }
@@ -107,9 +131,14 @@ pipeline {
         stage('Wait for PostgreSQL') {
             steps {
                 sh '''
+                echo "Waiting for PostgreSQL..."
+
                 until docker exec $CONTAINER_DB pg_isready -U hr_app_user -d ytech_hr; do
+                    echo "Postgres not ready..."
                     sleep 2
                 done
+
+                echo "PostgreSQL READY ✔"
                 '''
             }
         }
@@ -141,8 +170,9 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
+                echo "Checking application..."
                 sleep 5
-                curl -f http://127.0.0.1:8000 || curl -f http://localhost:8000
+                curl -f http://localhost:8000 || curl -f http://127.0.0.1:8000 || exit 1
                 '''
             }
         }
