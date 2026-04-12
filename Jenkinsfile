@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         IMAGE_NAME = "hr_app"
-        DOCKER_HUB_REPO = "YOUR_DOCKERHUB_USERNAME/crud_hr_app"
+        DOCKER_HUB_REPO = "peacechouaib/crud_hr_app"
         CONTAINER_WEB = "hr_app"
         CONTAINER_DB = "hr_postgres"
         TAG = "${BUILD_NUMBER}"
@@ -152,9 +152,7 @@ pipeline {
             steps {
                 sh '''
                 echo "Checking application..."
-
                 sleep 5
-
                 curl -f http://localhost:8000 || exit 1
                 '''
             }
