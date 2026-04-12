@@ -4,8 +4,6 @@ pipeline {
     environment {
         IMAGE_NAME = "hr_app"
         DOCKER_HUB_REPO = "peacechouaib/crud_hr_app"
-        CONTAINER_WEB = "hr_app"
-        CONTAINER_DB = "hr_postgres"
         TAG = "${BUILD_NUMBER}"
 
         SONAR_HOST_URL = "http://192.168.142.143:9000"
@@ -62,13 +60,13 @@ pipeline {
         stage('Trivy Security Scan') {
             steps {
                 sh '''
-                echo "Scanning image with Trivy..."
+                echo "Scanning image..."
                 trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || true
                 '''
             }
         }
 
-        stage('Docker Hub Login & Push') {
+        stage('Docker Hub Push') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'docker-hub-cred',
@@ -76,7 +74,7 @@ pipeline {
                     passwordVariable: 'PASS'
                 )]) {
                     sh '''
-                    echo "Logging into Docker Hub..."
+                    echo "Login Docker Hub..."
                     echo $PASS | docker login -u $USER --password-stdin
 
                     docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
@@ -86,21 +84,33 @@ pipeline {
             }
         }
 
-        stage('Deploy (Docker Compose)') {
+        stage('Deploy Containers') {
             steps {
                 sh '''
-                echo "Deploying containers..."
+                echo "Deploying..."
                 docker compose down || true
                 docker compose up -d --build
                 '''
             }
         }
 
-        stage('Database Migration') {
+        stage('Wait for PostgreSQL') {
             steps {
                 sh '''
-                echo "Waiting DB and running migrations..."
-                sleep 10
+                echo "Waiting for PostgreSQL..."
+
+                for i in {1..30}; do
+                    docker exec hr_postgres pg_isready -U hr_app_user && break
+                    echo "DB not ready yet..."
+                    sleep 2
+                done
+                '''
+            }
+        }
+
+        stage('Run Migrations') {
+            steps {
+                sh '''
                 docker exec hr_app python backend/manage.py migrate
                 '''
             }
@@ -110,7 +120,6 @@ pipeline {
             steps {
                 sh '''
                 echo "Checking app..."
-                sleep 5
                 curl -f http://localhost:8000 || exit 1
                 '''
             }
@@ -122,7 +131,7 @@ pipeline {
             emailext (
                 to: "herraditech@gmail.com",
                 subject: "✅ SUCCESS Build #${BUILD_NUMBER}",
-                body: "Pipeline executed successfully for HR App"
+                body: "Pipeline executed successfully"
             )
         }
 
