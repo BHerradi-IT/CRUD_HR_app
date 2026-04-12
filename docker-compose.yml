@@ -19,8 +19,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U hr_app_user"]
       interval: 10s
       timeout: 5s
-      retries: 15
-      start_period: 30s
+      retries: 20
+      start_period: 40s
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -44,7 +44,7 @@ services:
 
     command: >
       sh -c "
-      echo 'Waiting for database...' &&
+      echo 'Waiting DB...' &&
       sleep 10 &&
       python backend/manage.py migrate &&
       python backend/manage.py collectstatic --noinput || true &&
