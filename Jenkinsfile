@@ -7,6 +7,7 @@ pipeline {
         CONTAINER_WEB = "hr_app"
         CONTAINER_DB = "hr_postgres"
         TAG = "${BUILD_NUMBER}"
+        REPORT_FILE = "trivy-report.txt"
     }
 
     stages {
@@ -44,19 +45,6 @@ pipeline {
             }
         }
 
-        stage('Security Scan (Trivy)') {
-            steps {
-                sh '''
-                if command -v trivy >/dev/null 2>&1; then
-                    echo "Running Trivy scan..."
-                    trivy image python:3.11 || true
-                else
-                    echo "Trivy not installed, skipping"
-                fi
-                '''
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 sh '''
@@ -64,6 +52,40 @@ pipeline {
                 docker build -t $IMAGE_NAME:$TAG .
                 docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:latest
                 '''
+            }
+        }
+
+        stage('Security Scan (Trivy)') {
+            steps {
+                sh '''
+                if command -v trivy >/dev/null 2>&1; then
+                    echo "Running Trivy scan on built image..."
+                    trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || true
+                else
+                    echo "Trivy not installed" > $REPORT_FILE
+                fi
+                '''
+            }
+        }
+
+        stage('Send Trivy Report Email') {
+            steps {
+                emailext (
+                    subject: "🔐 Trivy Report - Build #${BUILD_NUMBER}",
+                    body: """
+                    Hello,
+
+                    Attached is the Trivy security scan report.
+
+                    Project: HR App
+                    Build: ${BUILD_NUMBER}
+
+                    Regards,
+                    Jenkins
+                    """,
+                    to: "herraditech@gmail.com",
+                    attachmentsPattern: "trivy-report.txt"
+                )
             }
         }
 
@@ -77,18 +99,18 @@ pipeline {
         }
 
         stage('Docker Hub Login') {
-    steps {
-        withCredentials([usernamePassword(
-            credentialsId: 'docker-hub-cred',
-            usernameVariable: 'USER',
-            passwordVariable: 'PASS'
-        )]) {
-            sh '''
-            echo $PASS | docker login -u $USER --password-stdin
-            '''
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'docker-hub-cred',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
+                    sh '''
+                    echo $PASS | docker login -u $USER --password-stdin
+                    '''
+                }
+            }
         }
-    }
-}
 
         stage('Push to Docker Hub') {
             steps {
@@ -161,11 +183,19 @@ pipeline {
 
     post {
         success {
-            echo "✅ Pipeline SUCCESS"
+            emailext (
+                subject: "✅ SUCCESS - Build #${BUILD_NUMBER}",
+                body: "Pipeline executed successfully",
+                to: "herraditech@gmail.com"
+            )
         }
 
         failure {
-            echo "❌ Pipeline FAILED"
+            emailext (
+                subject: "❌ FAILED - Build #${BUILD_NUMBER}",
+                body: "Pipeline failed. Check Jenkins logs.",
+                to: "herraditech@gmail.com"
+            )
             sh "docker logs $CONTAINER_WEB || true"
         }
 
