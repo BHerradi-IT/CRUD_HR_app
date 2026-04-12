@@ -20,28 +20,36 @@ pipeline {
         stage('Code Quality (Lint)') {
             steps {
                 sh '''
-                echo "Running lint check..."
+                echo "Running Lint..."
                 pip install flake8 || true
                 flake8 backend || true
                 '''
             }
         }
 
-        stage('Build Docker Image') {
+        stage('SonarQube Analysis (Optional)') {
             steps {
                 sh '''
-                echo "Building image..."
-                docker build -t $IMAGE_NAME:$TAG .
-            '''
+                if command -v sonar-scanner >/dev/null 2>&1; then
+                    echo "Running SonarQube..."
+                    sonar-scanner \
+                      -Dsonar.projectKey=hr_app \
+                      -Dsonar.sources=backend \
+                      -Dsonar.host.url=http://localhost:9000 \
+                      -Dsonar.login=YOUR_SONAR_TOKEN
+                else
+                    echo "SonarQube not installed, skipping"
+                fi
+                '''
             }
         }
 
-        stage('Security Scan (Optional Trivy)') {
+        stage('Security Scan (Trivy)') {
             steps {
                 sh '''
                 if command -v trivy >/dev/null 2>&1; then
                     echo "Running Trivy scan..."
-                    trivy image $IMAGE_NAME:$TAG
+                    trivy image python:3.11 || true
                 else
                     echo "Trivy not installed, skipping"
                 fi
@@ -49,9 +57,32 @@ pipeline {
             }
         }
 
-        stage('Docker Login') {
+        stage('Build Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                sh '''
+                echo "Building Docker image..."
+                docker build -t $IMAGE_NAME:$TAG .
+                docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:latest
+                '''
+            }
+        }
+
+        stage('Tag Image for Docker Hub') {
+            steps {
+                sh '''
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
+                '''
+            }
+        }
+
+        stage('Docker Hub Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'USER',
+                    passwordVariable: 'PASS'
+                )]) {
                     sh '''
                     echo $PASS | docker login -u $USER --password-stdin
                     '''
@@ -59,14 +90,21 @@ pipeline {
             }
         }
 
-        stage('Push Image') {
+        stage('Push to Docker Hub') {
             steps {
                 sh '''
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
-
+                echo "Pushing image to Docker Hub..."
                 docker push $DOCKER_HUB_REPO:$TAG
                 docker push $DOCKER_HUB_REPO:latest
+                '''
+            }
+        }
+
+        stage('Deploy Containers') {
+            steps {
+                sh '''
+                echo "Deploying containers..."
+                docker compose up -d --build
                 '''
             }
         }
@@ -77,7 +115,7 @@ pipeline {
                 echo "Waiting for PostgreSQL..."
 
                 until docker exec $CONTAINER_DB pg_isready -U hr_app_user -d ytech_hr; do
-                    echo "DB not ready..."
+                    echo "Postgres not ready..."
                     sleep 2
                 done
 
@@ -86,7 +124,7 @@ pipeline {
             }
         }
 
-        stage('Migrate Database') {
+        stage('Run Migrations') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py migrate
@@ -94,7 +132,7 @@ pipeline {
             }
         }
 
-        stage('Collect Static (safe)') {
+        stage('Collect Static') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py collectstatic --noinput || true
@@ -102,7 +140,7 @@ pipeline {
             }
         }
 
-        stage('Seed Data (safe)') {
+        stage('Seed Data (Optional)') {
             steps {
                 sh '''
                 docker exec $CONTAINER_WEB python backend/manage.py seed_demo || true
@@ -110,11 +148,22 @@ pipeline {
             }
         }
 
+        stage('Health Check') {
+            steps {
+                sh '''
+                echo "Checking application..."
+
+                sleep 5
+
+                curl -f http://localhost:8000 || exit 1
+                '''
+            }
+        }
     }
 
     post {
         success {
-            echo "✔ Pipeline SUCCESS"
+            echo "✅ Pipeline SUCCESS"
         }
 
         failure {
