@@ -28,35 +28,34 @@ pipeline {
             }
         }
 
-      stage('SonarQube Analysis') {
-    steps {
-        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-            sh '''
-            echo "========== SonarQube Analysis Started =========="
+        stage('SonarQube Analysis') {
+            steps {
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                    echo "========== SonarQube Analysis Started =========="
 
-            docker run --rm \
-              -v $(pwd):/usr/src \
-              -w /usr/src \
-              sonarsource/sonar-scanner-cli:latest \
-              sonar-scanner \
-              -Dsonar.projectKey=hr_app \
-              -Dsonar.projectName="hr_app" \
-              -Dsonar.projectVersion=1.0 \
-              -Dsonar.sources=backend \
-              -Dsonar.exclusions=**/migrations/**,**/__pycache__/**,**/static/** \
-              -Dsonar.host.url=http://192.168.142.142:9000 \
-              -Dsonar.login=$SONAR_TOKEN
+                    docker run --rm \
+                      -v $(pwd):/usr/src \
+                      -w /usr/src \
+                      sonarsource/sonar-scanner-cli:latest \
+                      sonar-scanner \
+                      -Dsonar.projectKey=hr_app \
+                      -Dsonar.projectName="hr_app" \
+                      -Dsonar.projectVersion=1.0 \
+                      -Dsonar.sources=backend \
+                      -Dsonar.exclusions=**/migrations/**,**/__pycache__/**,**/static/** \
+                      -Dsonar.host.url=http://192.168.142.142:9000 \
+                      -Dsonar.login=$SONAR_TOKEN
 
-            echo "✅ SonarQube analysis completed"
-            '''
+                    echo "Sonar analysis completed"
+                    '''
+                }
+            }
         }
-    }
-}
 
         stage('Build Docker Image') {
             steps {
                 sh '''
-                echo "Building Docker image..."
                 docker build -t $IMAGE_NAME:$TAG .
                 docker tag $IMAGE_NAME:$TAG $IMAGE_NAME:latest
                 '''
@@ -66,41 +65,7 @@ pipeline {
         stage('Security Scan (Trivy)') {
             steps {
                 sh '''
-                echo "Running Trivy scan..."
-
-                trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || true
-
-                echo "Trivy scan completed ✔"
-                '''
-            }
-        }
-
-        stage('Send Trivy Report Email') {
-            steps {
-                emailext (
-                    subject: "🔐 Trivy Report - Build #${BUILD_NUMBER}",
-                    body: """
-                    Hello,
-
-                    Attached is the Trivy security scan report.
-
-                    Project: HR App
-                    Build: ${BUILD_NUMBER}
-
-                    Regards,
-                    Jenkins
-                    """,
-                    to: "herraditech@gmail.com",
-                    attachmentsPattern: "trivy-report.txt"
-                )
-            }
-        }
-
-        stage('Tag Image for Docker Hub') {
-            steps {
-                sh '''
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
-                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
+                trivy image $IMAGE_NAME:$TAG > $REPORT_FILE || echo "Trivy failed" > $REPORT_FILE
                 '''
             }
         }
@@ -122,7 +87,9 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 sh '''
-                echo "Pushing image to Docker Hub..."
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:$TAG
+                docker tag $IMAGE_NAME:$TAG $DOCKER_HUB_REPO:latest
+
                 docker push $DOCKER_HUB_REPO:$TAG
                 docker push $DOCKER_HUB_REPO:latest
                 '''
@@ -132,7 +99,6 @@ pipeline {
         stage('Deploy Containers') {
             steps {
                 sh '''
-                echo "Deploying containers..."
                 docker compose up -d --build
                 '''
             }
@@ -141,14 +107,9 @@ pipeline {
         stage('Wait for PostgreSQL') {
             steps {
                 sh '''
-                echo "Waiting for PostgreSQL..."
-
                 until docker exec $CONTAINER_DB pg_isready -U hr_app_user -d ytech_hr; do
-                    echo "Postgres not ready..."
                     sleep 2
                 done
-
-                echo "PostgreSQL READY ✔"
                 '''
             }
         }
@@ -180,9 +141,8 @@ pipeline {
         stage('Health Check') {
             steps {
                 sh '''
-                echo "Checking application..."
                 sleep 5
-                curl -f http://localhost:8000 || exit 1
+                curl -f http://127.0.0.1:8000 || curl -f http://localhost:8000
                 '''
             }
         }
