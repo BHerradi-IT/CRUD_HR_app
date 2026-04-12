@@ -28,19 +28,30 @@ pipeline {
             }
         }
 
-       stage('SonarQube Analysis') {
-    steps {
-        withSonarQubeEnv('SonarQube') {
-            sh '''
-            sonar-scanner \
-              -Dsonar.projectKey=hr_app \
-              -Dsonar.sources=backend \
-              -Dsonar.host.url=http://192.168.142.142:9000 \
-              -Dsonar.login=YOUR_SONAR_TOKEN
-            '''
+ stage('SonarQube Analysis') {
+            steps {
+                script {
+                    sh '''
+                        echo "========== SonarQube Analysis Started =========="
+                        
+                        docker run --rm \
+                          -v $(pwd):/usr/src \
+                          -w /usr/src \
+                          sonarsource/sonar-scanner-cli:latest \
+                          sonar-scanner \
+                          -Dsonar.projectKey=hr_app \
+                          -Dsonar.projectName="hr_app" \
+                          -Dsonar.projectVersion=1.0 \
+                          -Dsonar.sources=frontend/src \
+                          -Dsonar.exclusions=**/node_modules/**,**/*.test.js \
+                          -Dsonar.host.url=${SONAR_HOST_URL} \
+                          -Dsonar.login=${SONAR_TOKEN}
+                        
+                        echo "✅ SonarQube analysis completed"
+                    '''
+                }
+            }
         }
-    }
-}
 
         stage('Build Docker Image') {
             steps {
